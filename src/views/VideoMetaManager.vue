@@ -70,6 +70,33 @@
             </n-flex>
           </n-flex>
         </n-form-item>
+        <n-form-item label="标签" path="tags">
+          <n-flex vertical>
+            <n-flex>
+              <n-tag
+                v-for="t in form.tags || []"
+                :key="t.id"
+                type="success"
+                closable
+                round
+                @close="removeTag(t.id)"
+              >
+                {{ t.name }}
+              </n-tag>
+            </n-flex>
+
+            <n-flex align="center">
+              <n-input
+                v-model:value="tagInput"
+                placeholder="输入新标签名并回车创建并添加"
+                style="width: 280px"
+                @keydown.enter.prevent="handleCreateAndAttachTag"
+                clearable
+              />
+              <n-button text type="primary" @click="openEditTagModal">编辑标签</n-button>
+            </n-flex>
+          </n-flex>
+        </n-form-item>
       </n-form>
       <template #action>
         <n-space>
@@ -77,6 +104,19 @@
           <n-button type="primary" @click="handleSubmit">保存</n-button>
         </n-space>
       </template>
+    </n-modal>
+    <!-- 编辑标签弹窗 -->
+    <n-modal v-model:show="showEditTagModal" title="选择标签" preset="dialog">
+      <n-flex vertical>
+        <n-transfer
+          v-model:value="form.tagIds"
+          :options="allTagOptions"
+          source-filterable
+        />
+        <n-flex justify="end">
+          <n-button type="primary" @click="handleSaveTags">保存</n-button>
+        </n-flex>
+      </n-flex>
     </n-modal>
     <!-- 编辑合集弹窗 -->
     <n-modal v-model:show="showEditCollectionModal" title="选择合集" preset="dialog">
@@ -131,6 +171,13 @@ import { CloseOutline } from '@vicons/ionicons5' // 引入关闭图标
 import {CollectionsAdd24Regular} from '@vicons/fluent'
 import { useCollectionStore } from '../stores/collection'
 import { useRoute } from 'vue-router'
+import {
+  fetchTagsWithVideoId,
+  fetchTags as fetchAllTags,
+  addTagsToVideo,
+  removeTagsFromVideo,
+  createTag
+} from '../api/tags'
 const collectionStore = useCollectionStore()
 
 
@@ -446,8 +493,9 @@ const columns = computed<DataTableColumns<VideoItem>>(() => {
 // 表单与弹窗
 const showModal = ref(false)
 const formRef = ref<FormInst | null>(null)
-const form = reactive<VideoItem& { collectionIds: number[] }>({
+const form = reactive<VideoItem& { collectionIds: number[]; tags: { id: number; name: string }[] | null; tagIds: number[] }>({
   id: 0,
+  uuid: '',
   title: '',
   description: '',
   location: '',
@@ -462,19 +510,35 @@ const form = reactive<VideoItem& { collectionIds: number[] }>({
   createdAt: '',
   updatedAt: '',
   collections: null,
-  collectionIds: []
+  collectionIds: [],
+  tags: null,
+  tagIds: [] as number[]
 })
 
 const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }]
 }
 
+type SimpleTag = { id: number; name: string }
+
+const tagInput = ref('')
+const showEditTagModal = ref(false)
+const allTagOptions = ref<{ label: string; value: number }[]>([])
+
 function openEditModal(row: VideoItem) {
-  Object.assign(form, { ...row })
+  Object.assign(form as any, { ...row })
   // 将 collections 转成 id 数组用于选择控件绑定
   form.collectionIds = row.collections ? row.collections.map(c => c.id) : []
   // 保存原始合集 id 快照，稍后提交时用于 diff
   originalCollectionIds.value = [...form.collectionIds]
+  // 加载当前视频标签
+  fetchTagsWithVideoId(row.id).then((tags: SimpleTag[]) => {
+    form.tags = tags || []
+    form.tagIds = (tags || []).map(t => t.id)
+  }).catch(() => {
+    form.tags = []
+    form.tagIds = []
+  })
   showModal.value = true
 }
 
@@ -567,6 +631,162 @@ function removeCollection(id: number) {
   if (form.collections) {
     form.collections = form.collections.filter(collection => collection.id !== id)
     form.collectionIds = form.collectionIds.filter(collectionId => collectionId !== id)
+  }
+}
+
+// 标签：打开“编辑标签”弹窗（穿梭框）
+async function openEditTagModal() {
+  const all = await fetchAllTags()
+  allTagOptions.value = (all || []).map((t: any) => ({ label: t.name, value: Number(t.id) }))
+  // 恢复当前选择
+  form.tagIds = (form.tags || []).map(t => t.id)
+  showEditTagModal.value = true
+}
+
+// 标签：保存穿梭框中的变更（点击保存后批量执行差异）
+async function handleSaveTags() {
+  const oldIds = (form.tags || []).map(t => t.id)
+  const newIds = (form.tagIds || []).map(Number)
+
+  const oldSet = new Set(oldIds)
+  const newSet = new Set(newIds)
+
+  const added = newIds.filter(id => !oldSet.has(id))
+  const removed = oldIds.filter(id => !newSet.has(id))
+
+  if (added.length > 0) {
+    await addTagsToVideo({ tagIds: added, videoId: Number(form.id) } )
+  }
+  if (removed.length > 0) {
+    await removeTagsFromVideo({ tagIds: removed, videoId: Number(form.id) } )
+  }
+
+  const tags = await fetchTagsWithVideoId(form.id)
+  form.tags = tags || []
+  form.tagIds = (tags || []).map(t => t.id)
+
+  showEditTagModal.value = false
+}
+
+// 标签：点击 tag 的关闭按钮立即移除
+async function removeTag(tagId: number) {
+  if (!form.id) return
+  await removeTagsFromVideo({ tagIds: [tagId], videoId: Number(form.id) } )
+  if (form.tags) {
+    form.tags = form.tags.filter(t => t.id !== tagId)
+  }
+  form.tagIds = form.tagIds.filter(id => id !== tagId)
+}
+
+// 标签：输入框回车创建新标签并绑定到当前视频
+async function handleCreateAndAttachTag() {
+  const name = (tagInput.value || '').trim()
+  if (!name) {
+    message.warning('请输入标签名称')
+    return
+  }
+  
+  if (!form.id || form.id === 0) {
+    message.error('无效的视频ID')
+    return
+  }
+
+  try {
+    // 创建标签
+    const result = await createTag({ name })
+    console.log('createTag 返回:', result)
+    
+    // 处理不同的返回情况
+    if (typeof result === 'string') {
+      // 返回的是字符串消息
+      if (result === '添加失败') {
+        throw new Error('标签创建失败')
+      }
+      
+      if (result === '已有同名tag') {
+        // 需要查询现有标签的 ID
+        const allTags = await fetchAllTags()
+        const existingTag = allTags.find((t: any) => t.name === name)
+        
+        if (!existingTag) {
+          throw new Error('找不到同名标签')
+        }
+        
+        const tagId = Number(existingTag.id)
+        
+        // 检查是否已添加
+        if (form.tagIds.includes(tagId)) {
+          message.warning('该标签已存在')
+          tagInput.value = ''
+          return
+        }
+        
+        // 添加现有标签到视频
+        await addTagsToVideo({ tagIds: [tagId], videoId: Number(form.id) })
+        
+        if (!form.tags) form.tags = []
+        form.tags.push({ id: tagId, name: existingTag.name })
+        form.tagIds.push(tagId)
+        
+        tagInput.value = ''
+        message.success('标签添加成功')
+        return
+      }
+      
+      if (result === 'tag添加成功') {
+        // 需要重新查询获取新标签的 ID
+        const allTags = await fetchAllTags()
+        const newTag = allTags.find((t: any) => t.name === name)
+        
+        if (!newTag) {
+          throw new Error('创建成功但找不到标签')
+        }
+        
+        const tagId = Number(newTag.id)
+        
+        // 添加到视频
+        await addTagsToVideo({ tagIds: [tagId], videoId: Number(form.id) })
+        
+        if (!form.tags) form.tags = []
+        form.tags.push({ id: tagId, name: newTag.name })
+        form.tagIds.push(tagId)
+        
+        tagInput.value = ''
+        message.success('标签添加成功')
+        return
+      }
+    }
+    
+    // 如果返回的是对象（标准格式）
+    if (result && typeof result === 'object' && result.id) {
+      const tagId = Number(result.id)
+      
+      if (isNaN(tagId) || tagId <= 0) {
+        throw new Error('无效的标签ID')
+      }
+      
+      if (form.tagIds.includes(tagId)) {
+        message.warning('该标签已存在')
+        tagInput.value = ''
+        return
+      }
+      
+      await addTagsToVideo({ tagIds: [tagId], videoId: Number(form.id) })
+      
+      if (!form.tags) form.tags = []
+      form.tags.push({ id: tagId, name: result.name })
+      form.tagIds.push(tagId)
+      
+      tagInput.value = ''
+      message.success('标签添加成功')
+      return
+    }
+    
+    throw new Error('未知的返回格式')
+    
+  } catch (error) {
+    console.error('操作失败:', error)
+    message.error(error instanceof Error ? error.message : '操作失败')
   }
 }
 </script>

@@ -33,20 +33,20 @@ export function deleteTag(id: number): Promise<void> {
 // 批量操作接口
 interface TagRelationParams {
   tagIds: number[];
-  videoIds?: number[];
-  imageIds?: number[];
+  videoId?: number;
+  imageId?: number;
 }
 
-export function addTagsToVideos(params: TagRelationParams): Promise<void> {
-  return request.post('/tag/add-tags-to-videos', params);
+export function addTagsToVideo(params: TagRelationParams): Promise<void> {
+  return request.post('/tag/add-tags-to-video', params);
 }
 
 export function addTagsToImages(params: TagRelationParams): Promise<void> {
   return request.post('/tag/add-tags-to-images', params);
 }
 
-export function removeTagsFromVideos(params: TagRelationParams): Promise<void> {
-  return request.post('/tag/remove-tags-from-videos', params);
+export function removeTagsFromVideo(params: TagRelationParams): Promise<void> {
+  return request.post('/tag/remove-tags-from-video', params);
 }
 
 export function removeTagsFromImages(params: TagRelationParams): Promise<void> {
