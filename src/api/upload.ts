@@ -6,8 +6,14 @@ interface InitiateParams {
   fileType: string;
   fileSize: number;
   fileHash: string;
+  gpsData?: GpsData | null;  // 添加这一行
 }
-
+export interface GpsData {
+  latitude: number;
+  longitude: number;
+  altitude: number | null;
+  dateTime?: string;
+}
 interface InitiateResponse{
   key:string;
   uploadId:string;
@@ -15,7 +21,6 @@ interface InitiateResponse{
   alreadyExists:boolean;
   url:string;//去重命中时为访问url DirectUpload时为上传url
   directUpload:boolean;
-
 }
 
 export function initiateUpload(params: InitiateParams):Promise<InitiateResponse>{

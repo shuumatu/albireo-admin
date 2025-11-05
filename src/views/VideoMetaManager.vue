@@ -467,7 +467,7 @@ const baseColumns: DataTableColumns<VideoItem> = [
 
 // 行双击打开视频
 function openVideo(row: VideoItem) {
-  const url = "http://localhost:5173/video/"+row.uuid
+  const url = "http://localhost:5174/video/"+row.uuid
   if (!url) {
     message.warning('该视频没有可用链接')
     return
