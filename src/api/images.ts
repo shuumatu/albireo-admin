@@ -11,6 +11,7 @@ export interface ImageItem {
   title: string;
   description: string;
   type: string;
+  status: string;
 }
 export interface ImageResponse {
   data: ImageItem[];

@@ -92,14 +92,24 @@
           <n-grid cols="4" x-gap="16" y-gap="16">
             <n-grid-item v-for="img in images" :key="img.id">
               <drag-select-option :value="img.id">
-                <div>
+                <div class="image-card-wrapper">
                   <n-card size="small" hoverable @click="handleCardClick(img, $event)"
                   :class="{ 'selected-card': (isBatchMode || isCollection)&&isCardSelected(img.id) }">
                     <n-flex vertical>
-                      <n-flex justify="center">
+                      <n-flex justify="center" class="image-container">
                         <n-image :src="img.imageUrl" width="100%" height="150px" object-fit="cover"   @click="handleImageClick"
                         :preview-disabled="isBatchMode || isCollection"
                         />
+                        <!-- 状态遮罩 -->
+                        <div v-if="img.status && img.status !== 'done'" :class="['status-overlay', `status-${img.status}`]">
+                          <n-flex vertical align="center" justify="center" style="height: 100%;">
+                            <n-spin v-if="img.status === 'uploading' || img.status === 'processing'" size="large" />
+                            <span class="status-text">{{ getStatusText(img.status) }}</span>
+                            <n-button v-if="img.status === 'failed'" type="error" size="small" @click.stop="handleRetry(img.id)">
+                              重试
+                            </n-button>
+                          </n-flex>
+                        </div>
                       </n-flex>
                       <n-flex justify="center">
                       {{ img.fileName }}
@@ -115,14 +125,24 @@
          <!-- 普通模式下仅展示网格，不启用拖选 -->
         <n-grid v-else-if="viewMode === 'grid'" cols="4" x-gap="16" y-gap="16">
           <n-grid-item v-for="img in images" :key="img.id">
-            <div>
+            <div class="image-card-wrapper">
               <n-card size="small" hoverable @click="handleCardClick(img, $event)">
                 <n-flex vertical>
-                  <n-flex justify="center">
+                  <n-flex justify="center" class="image-container">
                     <n-image :src="img.imageUrl" width="100%" height="150px" object-fit="cover"
                       @click="handleImageClick"
                       :preview-disabled="isBatchMode || isCollection"
                     />
+                    <!-- 状态遮罩 -->
+                    <div v-if="img.status && img.status !== 'done'" :class="['status-overlay', `status-${img.status}`]">
+                      <n-flex vertical align="center" justify="center" style="height: 100%;">
+                        <n-spin v-if="img.status === 'uploading' || img.status === 'processing'" size="large" />
+                        <span class="status-text">{{ getStatusText(img.status) }}</span>
+                        <n-button v-if="img.status === 'failed'" type="error" size="small" @click.stop="handleRetry(img.id)">
+                          重试
+                        </n-button>
+                      </n-flex>
+                    </div>
                   </n-flex>
                   <n-flex justify="center">
                     {{ img.fileName }}
@@ -235,7 +255,7 @@
 import { onMounted, ref ,h, reactive, computed} from 'vue'
 import { fetchImages ,deleteImage, updateImage, fetchCollectionsWithImageId, addImagesToCollections, removeImagesFromCollections, fetchImagesWithCollectionId} from '../api/images'
 import type { DataTableColumns } from 'naive-ui'
-import { NButton ,NPopconfirm, useMessage} from 'naive-ui'
+import { NButton ,NPopconfirm, useMessage, NTag, NSpin, NFlex} from 'naive-ui'
 import type { ImageItem, CollectionResponse } from '../api/images'
 import {GridOutline, CloseOutline} from '@vicons/ionicons5'
 import {List20Filled, CollectionsAdd24Regular} from '@vicons/fluent'
@@ -304,44 +324,107 @@ const baseColumns: DataTableColumns<ImageItem> = [
   { title: '标题', key: 'title' },
   { title: '描述', key: 'description' },
   {
+    title: '状态',
+    key: 'status',
+    width: 150,
+    render(row) {
+      if (!row.status || row.status === 'done') {
+        return h(
+          NTag,
+          { type: 'success', size: 'small' },
+          { default: () => '完成' }
+        )
+      }
+      
+      const statusConfig: Record<string, { type: any; text: string; showSpin: boolean }> = {
+        uploading: { type: 'info', text: '上传中', showSpin: true },
+        pending: { type: 'default', text: '待处理', showSpin: false },
+        processing: { type: 'warning', text: '处理中', showSpin: true },
+        failed: { type: 'error', text: '上传失败', showSpin: false }
+      }
+      
+      const config = statusConfig[row.status] || { type: 'default', text: row.status, showSpin: false }
+      
+      return h(
+        NFlex,
+        { align: 'center', size: 'small' },
+        {
+          default: () => [
+            config.showSpin ? h(NSpin, { size: 'small', style: { marginRight: '4px' } }) : null,
+            h(
+              NTag,
+              { type: config.type, size: 'small' },
+              { default: () => config.text }
+            )
+          ]
+        }
+      )
+    }
+  },
+  {
     title: '操作',
     key: 'actions',
-    width: 160, // 给操作区一个固定宽度
+    width: 160,
     render(row) {
-      return [
-        h(
-          NButton,
-          {
-            size: 'small',
-            style: { marginRight: '8px' },
-            onClick: () => handleEdit(row)
-          },
-          { default: () => '编辑' }
-
-        ),
-        h(
-        NPopconfirm,
-        {
-          onPositiveClick: () => handleDelete(row.id),
-          positiveText: '删除',
-          negativeText: '取消',
-          showIcon: false
-          
-        },
-        {
-          default: () => '确认要删除吗？',
-          trigger: () =>
-            h(
-              NButton,
-              {
-                size: 'small',
-                type: 'primary'
-              },
-              { default: () => '删除' }
-              )
-        }
+      const buttons = []
+      
+      // 如果状态是失败，显示重试按钮
+      if (row.status === 'failed') {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'warning',
+              style: { marginRight: '8px' },
+              onClick: () => handleRetry(row.id)
+            },
+            { default: () => '重试' }
+          )
         )
-      ]
+      }
+      
+      // 只有完成状态才能编辑
+      if (!row.status || row.status === 'done'|| row.status === 'pending') {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => handleEdit(row)
+            },
+            { default: () => '编辑' }
+          )
+        )
+      }
+      
+      // 删除按钮
+      buttons.push(
+        h(
+          NPopconfirm,
+          {
+            onPositiveClick: () => handleDelete(row.id),
+            positiveText: '删除',
+            negativeText: '取消',
+            showIcon: false
+          },
+          {
+            default: () => '确认要删除吗？',
+            trigger: () =>
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'primary'
+                },
+                { default: () => '删除' }
+              )
+          }
+        )
+      )
+      
+      return buttons
     }
   }
 ]
@@ -372,13 +455,12 @@ function handleImageClick(event: Event) {
 }
 // 处理卡片点击事件
 function handleCardClick(img: ImageItem, event: MouseEvent) {
-  if (isBatchMode.value || isCollection.value) {
-    // 批量模式或合集模式：切换选择状态
-    event.stopPropagation() // 阻止 drag-select 之外的行为
-    toggleImageSelection(img.id)
-  } else {
+  if (!isBatchMode.value && !isCollection.value) {
     // 普通模式：编辑图片
     handleEdit(img)
+  } else {
+    // 批量/合集模式交给 drag-select 自己处理
+    event.stopPropagation()
   }
 }
 // 切换图片选择状态
@@ -576,6 +658,33 @@ async function handleAddCollection(){
   }
 }
 
+// 获取状态文本
+function getStatusText(status: string): string {
+  const statusMap: Record<string, string> = {
+    uploading: '上传中',
+    pending: '待处理',
+    processing: '处理中',
+    failed: '上传失败'
+  }
+  return statusMap[status] || ''
+}
+
+// 处理重试
+async function handleRetry(imageId: number) {
+  try {
+    // 这里调用你的重试 API
+    // await retryImage(imageId)
+    message.info('正在重试上传...')
+    
+    // 重新获取数据以更新状态
+    await fetchPageData()
+    message.success('重试成功')
+  } catch (err) {
+    console.error('重试失败', err)
+    message.error('重试失败')
+  }
+}
+
 </script>
 
 <style scoped>
@@ -596,5 +705,58 @@ async function handleAddCollection(){
 
 .selected-card:hover {
   background-color: #c8f5c8 !important; /* 悬停时稍微深一点的绿色 */
+}
+
+/* 图片容器 */
+.image-container {
+  position: relative;
+}
+
+/* 状态遮罩基础样式 */
+.status-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  z-index: 10;
+}
+
+/* 上传中 - 半透明蓝色 */
+.status-uploading {
+  background-color: rgba(24, 144, 255, 0.7);
+}
+
+/* 待处理 - 半透明灰色 */
+.status-pending {
+  background-color: rgba(128, 128, 128, 0.7);
+}
+
+/* 处理中 - 半透明橙色 */
+.status-processing {
+  background-color: rgba(250, 140, 22, 0.7);
+}
+
+/* 失败 - 半透明红色 */
+.status-failed {
+  background-color: rgba(255, 77, 79, 0.7);
+}
+
+/* 状态文字样式 */
+.status-text {
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+  margin-top: 8px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* 确保卡片包装器没有额外的定位 */
+.image-card-wrapper {
+  position: relative;
 }
 </style>

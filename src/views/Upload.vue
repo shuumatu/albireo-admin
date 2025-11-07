@@ -1,5 +1,6 @@
 <template>
   <n-upload
+    ref="uploadRef"
     directory-dnd
     multiple
     :custom-request="handleCustomRequest"
@@ -132,7 +133,7 @@ interface UploadTask {
   progress: number
   speed?: string
   errorMessage?: string
-  gpsData?: {  // 添加这个属性
+  gpsData?: {
     latitude: number
     longitude: number
     altitude: number | null
@@ -149,14 +150,12 @@ interface UploadTask {
   }
 }
 
+const uploadRef = ref() // ✅ 新增：用于清理 Naive Upload 内部状态
 const uploadTasks = ref<UploadTask[]>([])
 
 function computeHash(file: File, chunkSize: number = 4 * 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("../workers/fileHashWorker.ts", import.meta.url), {
-      type: "module",
-    })
-
+    const worker = new Worker(new URL("../workers/fileHashWorker.ts", import.meta.url), { type: "module" })
     worker.onmessage = (e) => {
       const { status, hash, error } = e.data
       if (status === "done") {
@@ -167,13 +166,12 @@ function computeHash(file: File, chunkSize: number = 4 * 1024 * 1024): Promise<s
         worker.terminate()
       }
     }
-
     worker.postMessage({ file, chunkSize })
   })
 }
 
 function createParts(file: File, partSize: number) {
-  const parts: Array<{ partNumber: number; start: number; end: number }> = []
+  const parts = []
   let partNumber = 1
   for (let offset = 0; offset < file.size; offset += partSize, partNumber++) {
     parts.push({
@@ -191,8 +189,15 @@ function formatSpeed(bytesPerSecond: number): string {
   return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MB/s`
 }
 
+//  修正版：防止重复添加任务 + 清空内部缓存
 async function handleCustomRequest({ file }: UploadCustomRequestOptions) {
   if (!file.file) return
+
+  // 防止重复上传同一个文件
+  const exists = uploadTasks.value.some(t => 
+    t.fileName === file.name && t.fileSize === file.file.size && t.status !== 'error'
+  )
+  if (exists) return
 
   const taskId = Date.now().toString() + Math.random().toString(36).substr(2, 9)
   const task: UploadTask = {
@@ -208,6 +213,8 @@ async function handleCustomRequest({ file }: UploadCustomRequestOptions) {
 
   try {
     await performUpload(task)
+    // 上传完成后清空 Naive Upload 内部缓存，防止重复触发 handleCustomRequest
+    uploadRef.value?.clear()
   } catch (err: any) {
     console.error("上传失败", err)
     updateTaskStatus(taskId, 'error', err.message || '上传失败')
@@ -218,97 +225,89 @@ async function performUpload(task: UploadTask) {
   const startTime = Date.now()
   let lastLoaded = 0
   let lastTime = startTime
-
+  
   try {
-    // ===== 提取 GPS 信息(修正版) =====
+    const fileType = getFileType(task.file, task.fileName)
+    console.log("文件类型识别结果:", { fileName: task.fileName, fileType: fileType, fileSize: task.file.size })
+    // ===== 提取 EXIF GPS =====
     let gpsData = null
     try {
       const tags = await ExifReader.load(task.file)
-      
       const gpsLatitude = tags['GPSLatitude']?.description
       const gpsLongitude = tags['GPSLongitude']?.description
       const gpsAltitude = tags['GPSAltitude']?.description
       const dateTime = tags['DateTime']?.description || tags['DateTimeOriginal']?.description
-      
-      console.log('原始GPS数据:', {
-        latitude: gpsLatitude,
-        longitude: gpsLongitude,
-        altitude: gpsAltitude
-      })
-      
-      if (gpsLatitude != null && gpsLongitude != null) {
-        // 处理纬度和经度 - 可能是数字或字符串
-        let latitude: number
-        let longitude: number
-        
-        if (typeof gpsLatitude === 'number') {
-          latitude = gpsLatitude
-        } else {
-          latitude = parseFloat(gpsLatitude.toString().replace('°', ''))
-        }
-        
-        if (typeof gpsLongitude === 'number') {
-          longitude = gpsLongitude
-        } else {
-          longitude = parseFloat(gpsLongitude.toString().replace('°', ''))
-        }
-        
-        // 处理海拔 - 可能包含单位 "0 m"
-        let altitude: number | null = null
-        if (gpsAltitude) {
-          const altStr = gpsAltitude.toString().replace(/[^\d.-]/g, '') // 移除所有非数字字符
-          const altNum = parseFloat(altStr)
-          altitude = !isNaN(altNum) ? altNum : null
-        }
-        
+
+      if (gpsLatitude && gpsLongitude) {
+        const latitude = parseFloat(gpsLatitude.toString().replace(/[^\d.-]/g, ''))
+        const longitude = parseFloat(gpsLongitude.toString().replace(/[^\d.-]/g, ''))
+        const altStr = gpsAltitude ? gpsAltitude.toString().replace(/[^\d.-]/g, '') : null
+        const altitude = altStr ? parseFloat(altStr) : null
+
         if (!isNaN(latitude) && !isNaN(longitude)) {
-          gpsData = {
-            latitude,
-            longitude,
-            altitude,
-            dateTime
-          }
-          
-          // 保存到 task 对象
+          gpsData = { latitude, longitude, altitude, dateTime }
+          console.log("GPS数据提取成功:", { fileName: task.fileName, gpsData })
           const currentTask = uploadTasks.value.find(t => t.id === task.id)
-          if (currentTask) {
-            currentTask.gpsData = gpsData
-          }
-          
-          console.log('成功提取 GPS 信息:', gpsData)
+          if (currentTask) currentTask.gpsData = gpsData
         }
-      } else {
-        console.log('文件不包含 GPS 信息')
+      }else {
+        console.log("未找到GPS数据:", { fileName: task.fileName })
       }
+
     } catch (exifError) {
-      console.error('❌ 读取 EXIF 信息失败:', exifError)
+      console.warn('读取 EXIF 信息失败:', exifError)
     }
-    // ===== GPS 提取结束 =====
-
-
+    // ===== GPS 结束 =====
 
     // 计算文件哈希
     const fileHash = await computeHash(task.file)
-    console.log("文件 hash:", fileHash)
+    console.log("文件哈希计算完成:", { fileName: task.fileName, fileHash })
 
     // 初始化上传
     const init = await initiateUpload({
       fileName: task.fileName,
-      fileType: task.file.type || "",
+      fileType: fileType,
       fileSize: task.file.size,
-      fileHash: fileHash,
-      gpsData: gpsData // 新增：传递 GPS 数据
+      fileHash,
+      gpsData
     })
 
     if (init.alreadyExists) {
-      console.log("文件已存在，无需上传")
+      if (init.url) {
+        console.log("文件已存在但需要直传:", { fileName: task.fileName, fileHash, key: init.key })
+        const abortController = new AbortController()
+        const currentTask = uploadTasks.value.find(t => t.id === task.id)
+        if (currentTask) {
+          currentTask.uploadContext = { 
+            key: init.key, 
+            uploadId: '', 
+            partSize: 0, 
+            fileHash, 
+            parts: [], 
+            uploadedParts: [],
+            abortController
+          }
+        }
+
+        const resp = await fetch(init.url, { 
+          method: 'PUT', 
+          body: task.file,
+          signal: abortController.signal
+        })
+        if (!resp.ok) throw new Error('直接上传失败')
+
+        await completeDirectUpload({ fileHash, objectKey: init.key, fileType: fileType })
+        updateTaskProgress(task.id, 100)
+        updateTaskStatus(task.id, 'success')
+        return
+      }
+      console.log("文件已存在，跳过上传:", { fileName: task.fileName, fileHash, key: init.key })
       updateTaskProgress(task.id, 100)
       updateTaskStatus(task.id, 'success')
       return
     }
 
     if (init.directUpload && init.url) {
-      // 直接上传
       const abortController = new AbortController()
       const currentTask = uploadTasks.value.find(t => t.id === task.id)
       if (currentTask) {
@@ -328,10 +327,9 @@ async function performUpload(task: UploadTask) {
         body: task.file,
         signal: abortController.signal
       })
-      
       if (!resp.ok) throw new Error('直接上传失败')
-      
-      await completeDirectUpload({ fileHash, objectKey: init.key, fileType: task.file.type || "" })
+
+      await completeDirectUpload({ fileHash, objectKey: init.key, fileType: fileType })
       updateTaskProgress(task.id, 100)
       updateTaskStatus(task.id, 'success')
       return
@@ -346,7 +344,6 @@ async function performUpload(task: UploadTask) {
     const totalParts = parts.length
     let doneCount = uploadedSet.size
 
-    // 保存上传上下文
     const currentTask = uploadTasks.value.find(t => t.id === task.id)
     if (currentTask) {
       currentTask.uploadContext = {
@@ -362,7 +359,6 @@ async function performUpload(task: UploadTask) {
 
     updateTaskProgress(task.id, Math.floor((doneCount / totalParts) * 100))
 
-    // 并发上传
     const uploadedAll = await uploadWithConcurrency(
       task.id,
       parts,
@@ -373,29 +369,24 @@ async function performUpload(task: UploadTask) {
       6,
       (progress, loaded) => {
         updateTaskProgress(task.id, progress)
-        
-        // 计算速度
         const now = Date.now()
         const timeDiff = (now - lastTime) / 1000
         if (timeDiff > 0.5) {
           const speed = (loaded - lastLoaded) / timeDiff
-          const currentTask = uploadTasks.value.find(t => t.id === task.id)
-          if (currentTask) {
-            currentTask.speed = formatSpeed(speed)
-          }
+          const t = uploadTasks.value.find(t => t.id === task.id)
+          if (t) t.speed = formatSpeed(speed)
           lastLoaded = loaded
           lastTime = now
         }
       }
     )
 
-    // 完成上传
     uploadedAll.sort((a, b) => a.partNumber - b.partNumber)
     await completeUpload({ 
       hash: fileHash, 
       key: init.key, 
       uploadId: init.uploadId, 
-      fileType: task.file.type || "", 
+      fileType: fileType, 
       parts: uploadedAll 
     })
 
@@ -403,10 +394,7 @@ async function performUpload(task: UploadTask) {
     updateTaskStatus(task.id, 'success')
 
   } catch (err: any) {
-    if (err.name === 'AbortError') {
-      // 用户主动暂停，不设置为错误
-      return
-    }
+    if (err.name === 'AbortError') return
     throw err
   }
 }
@@ -433,18 +421,12 @@ async function uploadWithConcurrency(
   const run = async () => {
     while (i < parts.length) {
       const currentTask = uploadTasks.value.find(t => t.id === taskId)
-      if (!currentTask) break
-      if (currentTask.status === 'paused' || currentTask.status === 'pausing') break
+      if (!currentTask || currentTask.status === 'paused' || currentTask.status === 'pausing') break
 
       const part = parts[i++]
       if (uploadedSet.has(part.partNumber)) continue
 
-      const { url } = await getUploadUrl({
-        key,
-        uploadId,
-        partNumber: part.partNumber,
-      })
-
+      const { url } = await getUploadUrl({ key, uploadId, partNumber: part.partNumber })
       const blob = file.slice(part.start, part.end)
       const resp = await fetch(url, {
         method: "PUT",
@@ -455,47 +437,32 @@ async function uploadWithConcurrency(
 
       if (!resp.ok) throw new Error(`Part ${part.partNumber} upload failed`)
 
-      const etagHeader = resp.headers.get("etag") || ""
-      const eTag = etagHeader.replaceAll('"', "")
+      const eTag = (resp.headers.get("etag") || "").replaceAll('"', "")
       uploadedAll.push({ partNumber: part.partNumber, eTag })
-
-      // 保存已上传的分片
-      if (currentTask.uploadContext) {
-        currentTask.uploadContext.uploadedParts = [...uploadedAll]
-      }
+      if (currentTask.uploadContext) currentTask.uploadContext.uploadedParts = [...uploadedAll]
 
       doneCount++
       totalLoaded += blob.size
-      onProgress?.(
-        Math.min(99, Math.floor((doneCount / totalParts) * 100)),
-        totalLoaded
-      )
+      onProgress?.(Math.min(99, Math.floor((doneCount / totalParts) * 100)), totalLoaded)
     }
   }
 
   const pool = []
-  for (let j = 0; j < concurrency && j < parts.length; j++) {
-    pool.push(run())
-  }
+  for (let j = 0; j < concurrency && j < parts.length; j++) pool.push(run())
   await Promise.all(pool)
-
   return uploadedAll
 }
 
 function updateTaskProgress(taskId: string, progress: number) {
   const task = uploadTasks.value.find(t => t.id === taskId)
-  if (task) {
-    task.progress = progress
-  }
+  if (task) task.progress = progress
 }
 
 function updateTaskStatus(taskId: string, status: UploadTask['status'], errorMessage?: string) {
   const task = uploadTasks.value.find(t => t.id === taskId)
   if (task) {
     task.status = status
-    if (errorMessage) {
-      task.errorMessage = errorMessage
-    }
+    if (errorMessage) task.errorMessage = errorMessage
   }
 }
 
@@ -504,9 +471,7 @@ function pauseUpload(taskId: string) {
   if (task && task.status === 'uploading') {
     task.status = 'pausing'
     task.uploadContext?.abortController?.abort()
-    setTimeout(() => {
-      updateTaskStatus(taskId, 'paused')
-    }, 100)
+    setTimeout(() => updateTaskStatus(taskId, 'paused'), 100)
   }
 }
 
@@ -515,14 +480,11 @@ async function resumeUpload(taskId: string) {
   if (task && task.status === 'paused' && task.uploadContext) {
     task.status = 'uploading'
     task.uploadContext.abortController = new AbortController()
-    
     try {
       const uploadedSet = new Set<number>(task.uploadContext.uploadedParts.map(p => p.partNumber))
       const totalParts = task.uploadContext.parts.length
       let doneCount = uploadedSet.size
-
       updateTaskProgress(taskId, Math.floor((doneCount / totalParts) * 100))
-
       const uploadedAll = await uploadWithConcurrency(
         taskId,
         task.uploadContext.parts,
@@ -533,7 +495,6 @@ async function resumeUpload(taskId: string) {
         6,
         (progress) => updateTaskProgress(taskId, progress)
       )
-
       uploadedAll.sort((a, b) => a.partNumber - b.partNumber)
       await completeUpload({
         hash: task.uploadContext.fileHash,
@@ -542,13 +503,10 @@ async function resumeUpload(taskId: string) {
         fileType: task.file.type || "",
         parts: uploadedAll
       })
-
       updateTaskProgress(taskId, 100)
       updateTaskStatus(taskId, 'success')
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        updateTaskStatus(taskId, 'error', err.message || '上传失败')
-      }
+      if (err.name !== 'AbortError') updateTaskStatus(taskId, 'error', err.message || '上传失败')
     }
   }
 }
@@ -560,9 +518,9 @@ async function retryUpload(taskId: string) {
     task.progress = 0
     task.errorMessage = ''
     task.uploadContext = undefined
-    
     try {
       await performUpload(task)
+      uploadRef.value?.clear()
     } catch (err: any) {
       updateTaskStatus(taskId, 'error', err.message || '上传失败')
     }
@@ -571,15 +529,13 @@ async function retryUpload(taskId: string) {
 
 function removeTask(taskId: string) {
   const index = uploadTasks.value.findIndex(t => t.id === taskId)
-  if (index !== -1) {
-    uploadTasks.value.splice(index, 1)
-  }
+  if (index !== -1) uploadTasks.value.splice(index, 1)
 }
 
 function getStatusType(status: UploadTask['status']) {
   switch (status) {
     case 'uploading': return 'info'
-    case 'paused': return 'warning'
+    case 'paused':
     case 'pausing': return 'warning'
     case 'success': return 'success'
     case 'error': return 'error'
@@ -598,26 +554,60 @@ function getStatusText(status: UploadTask['status']) {
   }
 }
 
-// 转换 GPS 坐标格式
-const convertGPSToDecimal = (gpsCoords: number[] | undefined, ref: string | undefined): number | null => {
-  if (!gpsCoords || gpsCoords.length !== 3) return null
+function getFileType(file: File, fileName: string): string {
+  let fileType = file.type || ""
   
-  const degrees = gpsCoords[0]
-  const minutes = gpsCoords[1]
-  const seconds = gpsCoords[2]
-  
-  // 计算十进制度数
-  let decimal = degrees + (minutes / 60) + (seconds / 3600)
-  
-  // 根据方向调整符号
-  if (ref === 'S' || ref === 'W') {
-    decimal = -decimal
+  if (!fileType || fileType === "unknown") {
+    const ext = fileName.split('.').pop()?.toLowerCase()
+    const mimeTypes: Record<string, string> = {
+      // 图片
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'bmp': 'image/bmp',
+      'svg': 'image/svg+xml',
+      'ico': 'image/x-icon',
+      'heic': 'image/heic',
+      'heif': 'image/heif',
+      // 视频
+      'mp4': 'video/mp4',
+      'avi': 'video/x-msvideo',
+      'mov': 'video/quicktime',
+      'wmv': 'video/x-ms-wmv',
+      'flv': 'video/x-flv',
+      'mkv': 'video/x-matroska',
+      'webm': 'video/webm',
+      // 音频
+      'mp3': 'audio/mpeg',
+      'wav': 'audio/wav',
+      'ogg': 'audio/ogg',
+      'flac': 'audio/flac',
+      'aac': 'audio/aac',
+      // 文档
+      'pdf': 'application/pdf',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'xls': 'application/vnd.ms-excel',
+      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'ppt': 'application/vnd.ms-powerpoint',
+      'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'txt': 'text/plain',
+      // 压缩
+      'zip': 'application/zip',
+      'rar': 'application/x-rar-compressed',
+      '7z': 'application/x-7z-compressed',
+      'tar': 'application/x-tar',
+      'gz': 'application/gzip',
+    }
+    fileType = mimeTypes[ext || ''] || 'application/octet-stream'
   }
   
-  return decimal
+  return fileType
 }
-
 </script>
+
 
 <style scoped>
 .space-y-3 > * + * {
