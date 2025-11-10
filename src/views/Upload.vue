@@ -120,9 +120,9 @@ import {
   RefreshOutline as RefreshIcon,
   CloseCircleOutline as CloseIcon
 } from '@vicons/ionicons5'
-import { initiateUpload, getParts, getUploadUrl, completeUpload, completeDirectUpload } from '../api/upload'
+import { initiateUpload, getParts, getUploadUrl, completeUpload, completeDirectUpload} from '../api/upload'
 import type { UploadCustomRequestOptions } from 'naive-ui'
-import ExifReader from 'exifreader'
+import exifr from 'exifr'
 
 interface UploadTask {
   id: string
@@ -221,6 +221,75 @@ async function handleCustomRequest({ file }: UploadCustomRequestOptions) {
   }
 }
 
+
+// 将 Date 对象转换为带时区的 ISO 8601 格式
+// 输出: "2021-04-30T17:07:24+09:00"
+function dateToISOWithTimezone(date: Date): string {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  
+  // 获取时区偏移量
+  const timezoneOffset = -date.getTimezoneOffset();
+  const sign = timezoneOffset >= 0 ? '+' : '-';
+  const tzHours = Math.floor(Math.abs(timezoneOffset) / 60).toString().padStart(2, '0');
+  const tzMinutes = (Math.abs(timezoneOffset) % 60).toString().padStart(2, '0');
+  const timezone = `${sign}${tzHours}:${tzMinutes}`;
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${timezone}`;
+}
+
+// EXIF 日期格式转换为 ISO 8601 格式（带时区）
+// 输入: "2021:04:30 17:07:24" 或 "2021-04-30 17:07:24"
+// 输出: "2021-04-30T17:07:24+09:00" (带本地时区)
+function convertExifDateToISO(exifDate: string): string | null {
+  if (!exifDate) return null;
+  
+  try {
+    // 替换冒号为横线 (日期部分)，空格为 T
+    const normalized = exifDate
+      .replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')
+      .replace(' ', 'T');
+    
+    // 验证格式是否正确
+    const date = new Date(normalized);
+    if (isNaN(date.getTime())) return null;
+    
+    // 使用统一的函数格式化
+    return dateToISOWithTimezone(date);
+  } catch (error) {
+    console.warn('日期转换失败:', exifDate, error);
+    return null;
+  }
+}
+
+// 获取文件的修改时间（带时区）
+// 输出格式: "2021-04-30T17:07:24+09:00"
+function getFileDateTime(file: File): string {
+  const date = new Date(file.lastModified);
+  
+  // 获取本地时间的各个部分
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  
+  // 获取时区偏移量
+  const timezoneOffset = -date.getTimezoneOffset();
+  const sign = timezoneOffset >= 0 ? '+' : '-';
+  const tzHours = Math.floor(Math.abs(timezoneOffset) / 60).toString().padStart(2, '0');
+  const tzMinutes = (Math.abs(timezoneOffset) % 60).toString().padStart(2, '0');
+  const timezone = `${sign}${tzHours}:${tzMinutes}`;
+  
+  // 返回完整的 ISO 8601 格式（带时区）
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${timezone}`;
+}
+
 async function performUpload(task: UploadTask) {
   const startTime = Date.now()
   let lastLoaded = 0
@@ -229,48 +298,111 @@ async function performUpload(task: UploadTask) {
   try {
     const fileType = getFileType(task.file, task.fileName)
     console.log("文件类型识别结果:", { fileName: task.fileName, fileType: fileType, fileSize: task.file.size })
-    // ===== 提取 EXIF GPS =====
+    
+    // ===== 使用 exifr 提取图片/视频的 GPS 和时间信息 =====
     let gpsData = null
+    let dateTime = null
+    let dateTimeSource: 'exif' | 'file' = 'file'
+
     try {
-      const tags = await ExifReader.load(task.file)
-      const gpsLatitude = tags['GPSLatitude']?.description
-      const gpsLongitude = tags['GPSLongitude']?.description
-      const gpsAltitude = tags['GPSAltitude']?.description
-      const dateTime = tags['DateTime']?.description || tags['DateTimeOriginal']?.description
+      // 1. 提取完整的元数据（包含GPS和时间信息）
+      const metadata = await exifr.parse(task.file, {
+        gps: true,
+        pick: [
+          // GPS相关字段
+          'latitude', 'longitude', 'GPSLatitude', 'GPSLongitude',
+          'altitude', 'GPSAltitude', 'GPSAltitudeRef',
+          // 时间相关字段
+          'DateTimeOriginal', 'CreateDate', 'CreationDate',
+          'MediaCreateDate', 'TrackCreateDate', 'DateTime'
+        ]
+      })
 
-      if (gpsLatitude && gpsLongitude) {
-        const latitude = parseFloat(gpsLatitude.toString().replace(/[^\d.-]/g, ''))
-        const longitude = parseFloat(gpsLongitude.toString().replace(/[^\d.-]/g, ''))
-        const altStr = gpsAltitude ? gpsAltitude.toString().replace(/[^\d.-]/g, '') : null
-        const altitude = altStr ? parseFloat(altStr) : null
+      // 2. 提取 GPS 数据
+      if (metadata) {
+        // 优先使用 exifr 解析后的标准化字段
+        const lat = metadata.latitude ?? metadata.GPSLatitude
+        const lon = metadata.longitude ?? metadata.GPSLongitude
+        let alt = metadata.altitude ?? metadata.GPSAltitude
 
-        if (!isNaN(latitude) && !isNaN(longitude)) {
-          gpsData = { latitude, longitude, altitude, dateTime }
-          console.log("GPS数据提取成功:", { fileName: task.fileName, gpsData })
+        // 处理 GPSAltitudeRef（0表示海平面以上，1表示海平面以下）
+        if (alt != null && metadata.GPSAltitudeRef === 1) {
+          alt = -Math.abs(alt)
+        } else if (alt != null) {
+          alt = Math.abs(alt)
+        }
+
+        if (lat != null && lon != null) {
+          gpsData = {
+            latitude: lat,
+            longitude: lon,
+            altitude: alt != null ? alt : null
+          }
+          console.log("GPS数据提取成功:", { 
+            fileName: task.fileName, 
+            gpsData,
+            rawAltitude: metadata.GPSAltitude,
+            altitudeRef: metadata.GPSAltitudeRef
+          })
           const currentTask = uploadTasks.value.find(t => t.id === task.id)
           if (currentTask) currentTask.gpsData = gpsData
         }
-      }else {
-        console.log("未找到GPS数据:", { fileName: task.fileName })
       }
 
-    } catch (exifError) {
-      console.warn('读取 EXIF 信息失败:', exifError)
+      // 3. 提取时间数据
+      if (metadata) {
+        const rawDateTime = metadata.DateTimeOriginal
+                         || metadata.CreateDate
+                         || metadata.CreationDate
+                         || metadata.MediaCreateDate
+                         || metadata.TrackCreateDate
+                         || metadata.DateTime
+
+        if (rawDateTime) {
+          // exifr 可能返回 Date 对象或字符串
+          if (rawDateTime instanceof Date) {
+            dateTime = dateToISOWithTimezone(rawDateTime)
+            dateTimeSource = 'exif'
+          } else if (typeof rawDateTime === 'string') {
+            const converted = convertExifDateToISO(rawDateTime)
+            if (converted) {
+              dateTime = converted
+              dateTimeSource = 'exif'
+            }
+          }
+          console.log("EXIF拍摄时间提取成功:", { fileName: task.fileName, dateTime, source: dateTimeSource })
+        }
+      } else {
+        console.log("未找到元数据:", { fileName: task.fileName })
+      }
+
+    } catch (exifrError) {
+      console.warn('读取元数据失败，将使用文件时间:', exifrError)
     }
-    // ===== GPS 结束 =====
+
+    // ✅ 如果没有获取到拍摄时间，使用文件修改时间作为备选
+    if (!dateTime) {
+      dateTime = getFileDateTime(task.file)
+      dateTimeSource = 'file'
+      console.log("使用文件修改时间:", { fileName: task.fileName, dateTime, source: dateTimeSource })
+    }
+    // ===== 元数据提取结束 =====
 
     // 计算文件哈希
     const fileHash = await computeHash(task.file)
     console.log("文件哈希计算完成:", { fileName: task.fileName, fileHash })
 
-    // 初始化上传
+    // ✅ 初始化上传（包含 dateTimeSource）
     const init = await initiateUpload({
       fileName: task.fileName,
       fileType: fileType,
       fileSize: task.file.size,
       fileHash,
+      dateTime,          // ISO 8601 格式的日期时间
+      dateTimeSource,    // 标识日期来源
       gpsData
     })
+
 
     if (init.alreadyExists) {
       if (init.url) {

@@ -135,8 +135,6 @@
       </n-flex>
     </n-modal>
 
-
-
     <!-- 加入合集弹窗 -->
     <n-modal v-model:show="showCollectionModal" title="加入合集" preset="card" style="width: 40vw;"
       :mask-closable="false">
@@ -163,11 +161,14 @@ import {
   useLoadingBar,
   type FormInst,
   type DataTableColumns,
-  NPopconfirm
+  NPopconfirm,
+  NTag,
+  NSpin,
+  NFlex
 } from 'naive-ui'
 import { fetchVideoList,fetchCollectionsIds,addVideosToCollections, deleteVideos, updateVideo, removeVideosFromCollections} from '../api/manager'
 import type { VideoListResponse } from '../api/manager'
-import { CloseOutline } from '@vicons/ionicons5' // 引入关闭图标
+import { CloseOutline } from '@vicons/ionicons5'
 import {CollectionsAdd24Regular} from '@vicons/fluent'
 import { useCollectionStore } from '../stores/collection'
 import { useRoute } from 'vue-router'
@@ -179,7 +180,6 @@ import {
   createTag
 } from '../api/tags'
 const collectionStore = useCollectionStore()
-
 
 const loadingBar = useLoadingBar()
 
@@ -197,15 +197,14 @@ interface VideoItem {
   presignUrl: string
   videoUrl: string
   coverUrl: string | null
-  status: string | null
+  status?: 'uploading' | 'pending' | 'processing' | 'done' | 'failed' | null
   visibility: string | null
   createdAt: string
   updatedAt: string
   collections: { id: number; name: string; description: string }[]|null
 }
-// 在组件顶层（script setup）声明一个用于保存编辑前合集 id 的快照
-const originalCollectionIds = ref<number[]>([])
 
+const originalCollectionIds = ref<number[]>([])
 const message = useMessage()
 
 // 视频数据
@@ -217,7 +216,7 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(10)
 
-// 分页配置（Naive UI 推荐使用 computed）
+// 分页配置
 const pagination = computed(() => ({
   page: currentPage.value,
   pageSize: pageSize.value,
@@ -235,35 +234,28 @@ const pagination = computed(() => ({
   }
 }))
 
-
 // 加载数据
 async function loadVideoList() {
   loading.value = true
   try {
     const params: any = {
       page: currentPage.value,
-      pageSize: pageSize.value, 
-      // 如果 pinia 里有合集 id，则带上
+      pageSize: pageSize.value,
       collectionId: collectionStore.activeCollectionId == null 
-      ? 0 // 显式传“无合集”
+      ? 0
       : collectionStore.activeCollectionId
-
     }
     const response = await fetchVideoList(params) as unknown as VideoListResponse
-    // response 已经是后端返回的原始数据: { total: number, data: [] }
 
     if (response && response.data && Array.isArray(response.data)) {
       total.value = response.total ?? 0
       videoList.value = response.data
-      
     } else {
       console.error('Raw response:', response)
       throw new Error('API 返回格式不正确')
     }
 
-
     message.success('数据加载成功')
-
   } catch (error) {
     console.error('加载失败:', error)
     message.error('数据加载失败')
@@ -272,10 +264,10 @@ async function loadVideoList() {
   } finally {
     loading.value = false
   }
-  
 }
+
 const route = useRoute()
-// 组件挂载时加载数据
+
 onMounted(() => {
   if (route.path === '/manager/video') {
     collectionStore.setCollection(0)
@@ -283,28 +275,16 @@ onMounted(() => {
   loadVideoList()
 })
 
-
-
-
-
-// watch(() => route.fullPath, () => {
-//   // 合集变更时刷新列表
-//   collectionStore.activeCollectionId = 0
-//   console.log('route.fullPath', route.fullPath)
-//   loadVideoList()
-// })
-const selectedCollection = ref<(number)[]>([]);
- // 绑定选中的值
+const selectedCollection = ref<(number)[]>([])
 const collectionOptions = ref<{ label: string; value: string | number }[]>([])
 
-
 const isCollection = ref(false)
-//开始添加合集
+
 function startCollection(){
   isCollection.value = true
 }
-//执行加入合集
-const showCollectionModal = ref(false) // 控制“加入合集”模态框显示
+
+const showCollectionModal = ref(false)
 
 async function addCollection(){
   loadingBar.start()
@@ -333,13 +313,12 @@ async function handleAddCollection(){
   }
   try {
     const payload = {
-      collectionIds: selectedCollection.value.map(id => Number(id)), // 选中的合集 id 数组
-      videoIds: selectedKeys.value.map(id => Number(id))              // 选中的视频 id 数组
+      collectionIds: selectedCollection.value.map(id => Number(id)),
+      videoIds: selectedKeys.value.map(id => Number(id))
     }
-    await addVideosToCollections(payload) // 调你后端的 API
+    await addVideosToCollections(payload)
     message.success('添加成功')
     await loadVideoList()
-
 
     showCollectionModal.value = false
     isCollection.value = false
@@ -350,20 +329,19 @@ async function handleAddCollection(){
   }
 }
 
-
-
 // 删除模式与选中 ID
 const isDeleting = ref(false)
 const selectedKeys = ref<RowKey[]>([])
 
-
 function startDelete() {
   isDeleting.value = true
 }
+
 function cancelDeleteMode() {
   isDeleting.value = false
   selectedKeys.value = []
 }
+
 async function confirmDelete() {
   if (selectedKeys.value.length === 0) {
     message.warning('请先选择要删除的视频')
@@ -380,12 +358,37 @@ async function confirmDelete() {
     selectedKeys.value = []
     isDeleting.value = false
   }
-  
-  
 }
 
 function handleSelectionChange(keys: RowKey[]) {
   selectedKeys.value = keys
+}
+
+// 获取状态文本
+function getStatusText(status: string): string {
+  const statusMap: Record<string, string> = {
+    uploading: '上传中',
+    pending: '待处理',
+    processing: '处理中',
+    failed: '上传失败'
+  }
+  return statusMap[status] || ''
+}
+
+// 处理重试
+async function handleRetry(videoId: number) {
+  try {
+    // 这里调用你的重试 API
+    // await retryVideo(videoId)
+    message.info('正在重试上传...')
+    
+    // 重新获取数据以更新状态
+    await loadVideoList()
+    message.success('重试成功')
+  } catch (err) {
+    console.error('重试失败', err)
+    message.error('重试失败')
+  }
 }
 
 // 表格列
@@ -395,28 +398,65 @@ const baseColumns: DataTableColumns<VideoItem> = [
     key: 'index',
     width: 60,
     render: (_row: any, index: number) => {
-      return index + 1 // 当前页的第 index + 1 行
+      return index + 1
     }
   },
   { title: '标题', key: 'title', render: (row) => row.title || '-' },
   { 
     title: '描述', 
     key: 'description', 
-    render: (row) => row.description || '-' ,
+    render: (row) => row.description || '-',
     ellipsis: {
-      tooltip: true // 鼠标悬停显示完整内容
+      tooltip: true
     }
   },
   { title: '文件名', key: 'fileName' },
   {
     title: '合集',
     key: 'collections',
-      render: (row) => {
+    render: (row) => {
       if (!row.collections || row.collections.length === 0) {
         return '-'
       }
-      // 显示多个合集名字，用逗号隔开
       return row.collections.map(c => c.name).join(', ')
+    }
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 150,
+    render(row) {
+      if (!row.status || row.status === 'done') {
+        return h(
+          NTag,
+          { type: 'success', size: 'small' },
+          { default: () => '完成' }
+        )
+      }
+      
+      const statusConfig: Record<string, { type: any; text: string; showSpin: boolean }> = {
+        uploading: { type: 'info', text: '上传中', showSpin: true },
+        pending: { type: 'default', text: '待处理', showSpin: false },
+        processing: { type: 'warning', text: '处理中', showSpin: true },
+        failed: { type: 'error', text: '上传失败', showSpin: false }
+      }
+      
+      const config = statusConfig[row.status] || { type: 'default', text: row.status, showSpin: false }
+      
+      return h(
+        NFlex,
+        { align: 'center', size: 'small' },
+        {
+          default: () => [
+            config.showSpin ? h(NSpin, { size: 'small', style: { marginRight: '4px' } }) : null,
+            h(
+              NTag,
+              { type: config.type, size: 'small' },
+              { default: () => config.text }
+            )
+          ]
+        }
+      )
     }
   },
   {
@@ -428,39 +468,65 @@ const baseColumns: DataTableColumns<VideoItem> = [
     title: '操作',
     key: 'actions',
     render(row) {
-      return [
+      const buttons = []
+      
+      // 如果状态是失败，显示重试按钮
+      if (row.status === 'failed') {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              type: 'warning',
+              style: { marginRight: '8px' },
+              onClick: () => handleRetry(row.id)
+            },
+            { default: () => '重试' }
+          )
+        )
+      }
+      
+      // 只有完成状态才能编辑
+      if (!row.status || row.status === 'done'|| row.status === 'pending') {
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => openEditModal(row)
+            },
+            { default: () => '编辑' }
+          )
+        )
+      }
+      
+      // 删除按钮
+      buttons.push(
         h(
-          NButton,
+          NPopconfirm,
           {
-            size: 'small',
-            style: { marginRight: '8px' },
-            onClick: () => openEditModal(row)
+            onPositiveClick: () => handleDelete(row.id),
+            positiveText: '删除',
+            negativeText: '取消',
+            showIcon: false
           },
-          { default: () => '编辑' }
-        ),
-        h(
-        NPopconfirm,
-        {
-          onPositiveClick: () => handleDelete(row.id),
-          positiveText: '删除',
-          negativeText: '取消',
-          showIcon: false
-          
-        },
-        {
-          default: () => '确认要删除吗？',
-          trigger: () =>
-            h(
-              NButton,
-              {
-                size: 'small',
-                type: 'error'
-              },
-              { default: () => '删除' }
-            )
-        }
+          {
+            default: () => '确认要删除吗？',
+            trigger: () =>
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'error'
+                },
+                { default: () => '删除' }
+              )
+          }
+        )
       )
-      ]
+      
+      return buttons
     }
   }
 ]
@@ -505,7 +571,7 @@ const form = reactive<VideoItem& { collectionIds: number[]; tags: { id: number; 
   presignUrl: '',
   videoUrl: '',
   coverUrl: '',
-  status: '',
+  status: null,
   visibility: '',
   createdAt: '',
   updatedAt: '',
@@ -527,11 +593,8 @@ const allTagOptions = ref<{ label: string; value: number }[]>([])
 
 function openEditModal(row: VideoItem) {
   Object.assign(form as any, { ...row })
-  // 将 collections 转成 id 数组用于选择控件绑定
   form.collectionIds = row.collections ? row.collections.map(c => c.id) : []
-  // 保存原始合集 id 快照，稍后提交时用于 diff
   originalCollectionIds.value = [...form.collectionIds]
-  // 加载当前视频标签
   fetchTagsWithVideoId(row.id).then((tags: SimpleTag[]) => {
     form.tags = tags || []
     form.tagIds = (tags || []).map(t => t.id)
@@ -546,27 +609,22 @@ async function handleSubmit() {
   formRef.value?.validate(async (errors) => {
     if (!errors) {
       try{
-        // 1. 原合集和新合集（确保都为数字数组）
         const oldIds = originalCollectionIds.value || []
         const newIds = (form.collectionIds || []).map(id => Number(id))
       
-        // 2. 使用 Set 计算差集（效率好、语义清晰）
         const oldSet = new Set(oldIds)
         const newSet = new Set(newIds)
 
-        const added = newIds.filter(id => !oldSet.has(id))  // 需要加入的合集
-        const removed = oldIds.filter(id => !newSet.has(id))  // 需要移除的合集
+        const added = newIds.filter(id => !oldSet.has(id))
+        const removed = oldIds.filter(id => !newSet.has(id))
 
-        // 3. 先更新视频的基本字段（标题、描述等）
         await updateVideo(form.id, { title: form.title ?? '', description: form.description ?? ''})
 
-        // 4. 根据差集调用合集相关 API（只有非空时才调用）
         if (added.length > 0) {
-        // payload 结构根据你后端的接口调整
-        await addVideosToCollections({
-          collectionIds: added,
-          videoIds: [form.id]
-        })
+          await addVideosToCollections({
+            collectionIds: added,
+            videoIds: [form.id]
+          })
         }
         if (removed.length > 0) {
           await removeVideosFromCollections({
@@ -575,11 +633,8 @@ async function handleSubmit() {
           })
         }
 
-
-
         await loadVideoList()
         message.success('编辑成功')
-
         showModal.value = false
       }catch (err) {
         console.error(err)
@@ -588,6 +643,7 @@ async function handleSubmit() {
     }
   })
 }
+
 const showEditCollectionModal = ref(false)
 
 async function openEditCollectionModal(){
@@ -596,15 +652,9 @@ async function openEditCollectionModal(){
     label: c.name,
     value: c.id
   }))
-
-  // 恢复初始选择
   form.collectionIds = form.collections ? form.collections.map(c => c.id) : []
-
   showEditCollectionModal.value = true
-
-
 }
-
 
 async function handleDelete(id: number) {
   try {
@@ -616,14 +666,11 @@ async function handleDelete(id: number) {
     message.error('删除失败')
   }
 }
+
 function handleSaveCollections(){
-
-
-   // 用 options 匹配到完整的 {id, name} 对象，给 tag 使用
   form.collections = collectionOptions.value
     .filter(opt => form.collectionIds.includes(Number(opt.value)))
     .map(opt => ({ id: Number(opt.value), name: opt.label, description: '' }))
-
   showEditCollectionModal.value = false
 }
 
@@ -634,16 +681,13 @@ function removeCollection(id: number) {
   }
 }
 
-// 标签：打开“编辑标签”弹窗（穿梭框）
 async function openEditTagModal() {
   const all = await fetchAllTags()
   allTagOptions.value = (all || []).map((t: any) => ({ label: t.name, value: Number(t.id) }))
-  // 恢复当前选择
   form.tagIds = (form.tags || []).map(t => t.id)
   showEditTagModal.value = true
 }
 
-// 标签：保存穿梭框中的变更（点击保存后批量执行差异）
 async function handleSaveTags() {
   const oldIds = (form.tags || []).map(t => t.id)
   const newIds = (form.tagIds || []).map(Number)
@@ -668,7 +712,6 @@ async function handleSaveTags() {
   showEditTagModal.value = false
 }
 
-// 标签：点击 tag 的关闭按钮立即移除
 async function removeTag(tagId: number) {
   if (!form.id) return
   await removeTagsFromVideo({ tagIds: [tagId], videoId: Number(form.id) } )
@@ -678,7 +721,6 @@ async function removeTag(tagId: number) {
   form.tagIds = form.tagIds.filter(id => id !== tagId)
 }
 
-// 标签：输入框回车创建新标签并绑定到当前视频
 async function handleCreateAndAttachTag() {
   const name = (tagInput.value || '').trim()
   if (!name) {
@@ -692,19 +734,15 @@ async function handleCreateAndAttachTag() {
   }
 
   try {
-    // 创建标签
     const result = await createTag({ name })
     console.log('createTag 返回:', result)
     
-    // 处理不同的返回情况
     if (typeof result === 'string') {
-      // 返回的是字符串消息
       if (result === '添加失败') {
         throw new Error('标签创建失败')
       }
       
       if (result === '已有同名tag') {
-        // 需要查询现有标签的 ID
         const allTags = await fetchAllTags()
         const existingTag = allTags.find((t: any) => t.name === name)
         
@@ -714,14 +752,12 @@ async function handleCreateAndAttachTag() {
         
         const tagId = Number(existingTag.id)
         
-        // 检查是否已添加
         if (form.tagIds.includes(tagId)) {
           message.warning('该标签已存在')
           tagInput.value = ''
           return
         }
         
-        // 添加现有标签到视频
         await addTagsToVideo({ tagIds: [tagId], videoId: Number(form.id) })
         
         if (!form.tags) form.tags = []
@@ -734,7 +770,6 @@ async function handleCreateAndAttachTag() {
       }
       
       if (result === 'tag添加成功') {
-        // 需要重新查询获取新标签的 ID
         const allTags = await fetchAllTags()
         const newTag = allTags.find((t: any) => t.name === name)
         
@@ -744,7 +779,6 @@ async function handleCreateAndAttachTag() {
         
         const tagId = Number(newTag.id)
         
-        // 添加到视频
         await addTagsToVideo({ tagIds: [tagId], videoId: Number(form.id) })
         
         if (!form.tags) form.tags = []
@@ -757,7 +791,6 @@ async function handleCreateAndAttachTag() {
       }
     }
     
-    // 如果返回的是对象（标准格式）
     if (result && typeof result === 'object' && result.id) {
       const tagId = Number(result.id)
       
@@ -801,16 +834,15 @@ async function handleCreateAndAttachTag() {
   height: 50px;
   display: flex;
   justify-content: space-between;
-  align-items: center;            /* 垂直居中 */
-  background-color: #f0f9ff; /* 浅蓝色 */
-  margin-bottom: 20px; /* 与下一个区域的间距 */
+  align-items: center;
+  background-color: #f0f9ff;
+  margin-bottom: 20px;
 }
 .collection-area .left {
   margin-left: 15px;
   display: flex;
   justify-content: space-around;
-  align-items: center;            /* 垂直居中 */
-
+  align-items: center;
 }
 .collection-area .left a {
   margin-left: 15px;
@@ -819,8 +851,7 @@ async function handleCreateAndAttachTag() {
 }
 .collection-area .right {
   display: flex;
-  align-items: center;            /* 垂直居中 */
+  align-items: center;
   margin-right: 15px;
 }
-
 </style>

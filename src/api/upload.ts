@@ -1,18 +1,21 @@
 import request from "../utils/request";
 const UPLOAD_API_BASE = import.meta.env.VITE_UPLOAD_API_BASE as string;
 
+
+
 interface InitiateParams {
   fileName: string;
   fileType: string;
   fileSize: number;
   fileHash: string;
+  dateTime?: string | null;  // ISO 8601 格式的日期时间，如: "2021-04-30T17:07:24"
   gpsData?: GpsData | null;  // 添加这一行
+  dateTimeSource?: 'exif' | 'file';
 }
 export interface GpsData {
   latitude: number;
   longitude: number;
   altitude: number | null;
-  dateTime?: string;
 }
 interface InitiateResponse{
   key:string;
