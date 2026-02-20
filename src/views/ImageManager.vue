@@ -168,7 +168,7 @@
   </n-flex>
   <n-modal v-model:show="showModal" title="图片信息" preset="card" style="width: 40vw;">
     <n-flex vertical>
-      <n-image :src="modal.imageUrl" width="40%" :img-props="{ style: 'margin: 0 auto; display: block;' }"/>
+      <n-image :src="thumbUrl" width="40%" :img-props="{ style: 'margin: 0 auto; display: block;' }"/>
       <n-form :model="modal" label-width="auto">
         <n-form-item label="文件名">
           {{modal.fileName}}
@@ -684,7 +684,11 @@ async function handleRetry(imageId: number) {
     message.error('重试失败')
   }
 }
-
+const thumbUrl = computed(() => {
+  if (!modal.imageUrl) return ''
+  // 将 /raw/xxx 替换为 /thumb/thumb.jpg
+  return modal.imageUrl.replace(/\/raw\/[^/]+$/, '/thumb/thumb.jpg')
+})
 </script>
 
 <style scoped>
