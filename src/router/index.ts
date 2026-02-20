@@ -7,6 +7,7 @@ import CollectionManager from '../views/CollectionManager.vue'
 import CollectionDetail from '../views/CollectionDetail.vue'
 import ImageManager from '../views/ImageManager.vue'
 import TagManager from '../views/TagManager.vue'
+import SystemConfigManager from '../views/SystemConfigManager.vue'
 
 const routes = [
     {
@@ -47,6 +48,12 @@ const routes = [
         name: 'tagManager',
         meta: { title: '标签管理' },
         component:TagManager
+    },
+    {
+        path: '/manager/system-config',
+        name: 'systemConfigManager',
+        meta: { title: '系统配置管理' },
+        component: SystemConfigManager
     },
     {
         path: '/map',

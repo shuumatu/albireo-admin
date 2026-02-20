@@ -4,7 +4,7 @@
     <div class="logo">
       <router-link to="/">
         <img
-          src="https://albireo.shuumatu.com/uploads/946834b5-69ed-4dbd-8b24-cf8f50db7e4b-0e84dd80119bbfc52609e5e4fda0b57.png"
+          src="https://albireo.shuumatu.com/uploads/0e84dd80119bbfc52609e5e4fda0b57.png"
           alt="Logo"
         />
       </router-link>
@@ -52,20 +52,24 @@ const menuOptions = [
     key: '/manager',
     children:[
       {
-        label:'视频管理',
-        key:'/manager/video'
+        label: '视频管理',
+        key: '/manager/video'
       },
       {
-        label:'合集管理',
-        key:'/manager/collection'
+        label: '合集管理',
+        key: '/manager/collection'
       },
       {
-        label:'图片管理',
-        key:'/manager/image'
+        label: '图片管理',
+        key: '/manager/image'
       },
       {
-        label:'标签管理',
-        key:'/manager/tag'
+        label: '标签管理',
+        key: '/manager/tag'
+      },
+      {
+        label: '系统配置',
+        key: '/manager/system-config'
       }
     ]
   }
