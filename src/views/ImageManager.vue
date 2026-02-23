@@ -216,6 +216,27 @@
       </n-form>
     </n-flex>
   </n-modal>
+
+  <!-- 位置信息弹窗 -->
+  <n-modal
+    v-model:show="showImageLocationModal"
+    title="位置信息"
+    preset="card"
+    style="width: 60vw;"
+    :mask-closable="false"
+  >
+    <n-flex vertical>
+      <div v-if="currentLocationImage" style="margin-bottom: 8px;">
+        当前图片：{{ currentLocationImage.title || currentLocationImage.fileName }}
+      </div>
+      <LocationPicker v-model="imageLocationPoint" height="400px" />
+      <n-flex justify="end" style="margin-top: 12px;">
+        <n-button @click="showImageLocationModal = false">取消</n-button>
+        <n-button type="primary" @click="handleSaveImageLocation">保存位置</n-button>
+      </n-flex>
+    </n-flex>
+  </n-modal>
+
   <!-- 编辑合集弹窗 -->
 <n-modal v-model:show="showEditCollectionModal" title="选择合集" preset="dialog">
   <template #icon>
@@ -263,6 +284,9 @@ import { fetchImageCollectionsIds } from '../api/manager'
 import {useImageManagerStore} from '../stores/imageManager'
 import { useCollectionDetailStore } from '../stores/collection'
 import { useRoute } from 'vue-router'
+import LocationPicker from '../components/LocationPicker.vue'
+import type { LocationPoint } from '../components/LocationPicker.vue'
+import { fetchImageLocation, updateImageLocation } from '../api/location'
 
 const showModal = ref(false)
 const imageManagerStore = useImageManagerStore()
@@ -308,15 +332,37 @@ onMounted(async () => {
     }
     await fetchPageData();
 })
-const modal = reactive<ImageItem & { collections: CollectionResponse[] }& {collectionIds: number[]}>({
+const modal = reactive<ImageItem & { collections: CollectionResponse[] } & { collectionIds: number[] }>({
   id: 0,
+  uuid: '',
   fileName: '',
   imageUrl: '',
   title: '',
   description: '',
-  type: '', 
-  collections: [], 
+  type: '',
+  status: '',
+  collections: [],
   collectionIds: []
+})
+
+function parseLocationString(s: string | null | undefined): LocationPoint | null {
+  if (s == null || String(s).trim() === '') return null
+  const parts = String(s).split(/[,，\s]+/).map((x) => parseFloat(x.trim())).filter((n) => !Number.isNaN(n))
+  if (parts.length >= 2) return { lat: parts[0], lng: parts[1] }
+  return null
+}
+
+const showImageLocationModal = ref(false)
+const imageLocationTarget = ref<ImageItem | null>(null)
+const imageLocationString = ref('')
+
+const currentLocationImage = computed(() => imageLocationTarget.value)
+
+const imageLocationPoint = computed<LocationPoint | null>({
+  get: () => parseLocationString(imageLocationString.value),
+  set: (v: LocationPoint | null) => {
+    imageLocationString.value = v ? `${v.lat},${v.lng}` : ''
+  }
 })
 
 const baseColumns: DataTableColumns<ImageItem> = [
@@ -364,7 +410,7 @@ const baseColumns: DataTableColumns<ImageItem> = [
   {
     title: '操作',
     key: 'actions',
-    width: 160,
+    width: 220,
     render(row) {
       const buttons = []
       
@@ -384,7 +430,7 @@ const baseColumns: DataTableColumns<ImageItem> = [
         )
       }
       
-      // 只有完成状态才能编辑
+      // 只有完成状态才能编辑/配置位置
       if (!row.status || row.status === 'done'|| row.status === 'pending') {
         buttons.push(
           h(
@@ -395,6 +441,18 @@ const baseColumns: DataTableColumns<ImageItem> = [
               onClick: () => handleEdit(row)
             },
             { default: () => '编辑' }
+          )
+        )
+
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => openImageLocationModal(row)
+            },
+            { default: () => '位置信息' }
           )
         )
       }
@@ -689,6 +747,49 @@ const thumbUrl = computed(() => {
   // 将 /raw/xxx 替换为 /thumb/thumb.jpg
   return modal.imageUrl.replace(/\/raw\/[^/]+$/, '/thumb/thumb.jpg')
 })
+
+function openImageLocationModal(row: ImageItem) {
+  imageLocationTarget.value = row
+  imageLocationString.value = ''
+  showImageLocationModal.value = true
+
+  fetchImageLocation(row.uuid)
+    .then((loc) => {
+      if (loc) {
+        imageLocationString.value = `${loc.latitude},${loc.longitude}`
+      } else {
+        message.info('该图片尚未配置位置信息')
+      }
+    })
+    .catch(() => {
+      message.error('获取位置信息失败')
+    })
+}
+
+function handleSaveImageLocation() {
+  if (!imageLocationTarget.value) {
+    showImageLocationModal.value = false
+    return
+  }
+
+  const point = imageLocationPoint.value
+  if (!point) {
+    message.warning('请先在地图上选择位置')
+    return
+  }
+
+  updateImageLocation(imageLocationTarget.value.uuid, {
+    longitude: point.lng,
+    latitude: point.lat
+  })
+    .then(() => {
+      message.success('位置信息已更新')
+      showImageLocationModal.value = false
+    })
+    .catch(() => {
+      message.error('更新位置信息失败')
+    })
+}
 </script>
 
 <style scoped>

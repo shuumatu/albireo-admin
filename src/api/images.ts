@@ -2,10 +2,12 @@ import request from "../utils/request";
 export interface ImageParams {
   page: number;
   pageSize: number;
+  uuid?: string;
 }
 
 export interface ImageItem {
   id: number;
+  uuid: string;
   fileName: string;
   imageUrl: string;
   title: string;

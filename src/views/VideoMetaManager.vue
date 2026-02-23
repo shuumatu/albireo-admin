@@ -150,6 +150,26 @@
         </n-flex>
       </n-flex>
     </n-modal>
+
+    <!-- 位置信息弹窗 -->
+    <n-modal
+      v-model:show="showLocationModal"
+      title="位置信息"
+      preset="card"
+      style="width: 60vw;"
+      :mask-closable="false"
+    >
+      <n-flex vertical>
+        <div v-if="currentLocationVideo" style="margin-bottom: 8px;">
+          当前视频：{{ currentLocationVideo.title || currentLocationVideo.fileName }}
+        </div>
+        <LocationPicker v-model="locationPointForModal" height="400px" :debug="true" />
+        <n-flex justify="end" style="margin-top: 12px;">
+          <n-button @click="showLocationModal = false">取消</n-button>
+          <n-button type="primary" @click="handleSaveLocation">保存位置</n-button>
+        </n-flex>
+      </n-flex>
+    </n-modal>
   </div>
 </template>
 
@@ -179,7 +199,17 @@ import {
   removeTagsFromVideo,
   createTag
 } from '../api/tags'
+import LocationPicker from '../components/LocationPicker.vue'
+import type { LocationPoint } from '../components/LocationPicker.vue'
+import { fetchVideoLocation, updateVideoLocation } from '../api/location'
 const collectionStore = useCollectionStore()
+
+function parseLocationString(s: string | null | undefined): LocationPoint | null {
+  if (s == null || String(s).trim() === '') return null
+  const parts = String(s).split(/[,，\s]+/).map((x) => parseFloat(x.trim())).filter((n) => !Number.isNaN(n))
+  if (parts.length >= 2) return { lat: parts[0], lng: parts[1] }
+  return null
+}
 
 const loadingBar = useLoadingBar()
 
@@ -286,6 +316,19 @@ function startCollection(){
 
 const showCollectionModal = ref(false)
 
+const showLocationModal = ref(false)
+const locationTarget = ref<VideoItem | null>(null)
+const locationString = ref('')
+
+const currentLocationVideo = computed(() => locationTarget.value)
+
+const locationPointForModal = computed<LocationPoint | null>({
+  get: () => parseLocationString(locationString.value),
+  set: (v: LocationPoint | null) => {
+    locationString.value = v ? `${v.lat},${v.lng}` : ''
+  }
+})
+
 async function addCollection(){
   loadingBar.start()
   try {
@@ -327,6 +370,67 @@ async function handleAddCollection(){
     console.error(err)
     message.error('添加失败')
   }
+}
+
+function openLocationModal(row: VideoItem) {
+  locationTarget.value = row
+  locationString.value = row.location || ''
+  showLocationModal.value = true
+
+  // 打开时从后端查询最新位置（如果已配置）
+  fetchVideoLocation(row.uuid)
+    .then((loc) => {
+      if (loc) {
+        // 字符串统一保存为「纬度,经度」，内部再转换为 LocationPoint
+        locationString.value = `${loc.latitude},${loc.longitude}`
+      } else if (!row.location) {
+        // 未配置位置且本地也没有，提示一次
+        message.info('该视频尚未配置位置信息')
+      }
+    })
+    .catch(() => {
+      message.error('获取位置信息失败')
+    })
+}
+
+function handleSaveLocation() {
+  if (!locationTarget.value) {
+    showLocationModal.value = false
+    return
+  }
+
+   const point = locationPointForModal.value
+   if (!point) {
+     message.warning('请先在地图上选择位置')
+     return
+   }
+
+  loadingBar.start()
+
+  updateVideoLocation(locationTarget.value.uuid, {
+    longitude: point.lng,
+    latitude: point.lat
+  })
+    .then(() => {
+      const id = locationTarget.value!.id
+      const idx = videoList.value.findIndex(v => v.id === id)
+      const locationStr = `${point.lat},${point.lng}`
+      if (idx !== -1) {
+        videoList.value[idx] = {
+          ...videoList.value[idx],
+          location: locationStr
+        }
+      }
+      locationString.value = locationStr
+      message.success('位置信息已更新')
+      showLocationModal.value = false
+    })
+    .catch(() => {
+      message.error('更新位置信息失败')
+    })
+    .finally(() => {
+      loadingBar.finish()
+    })
 }
 
 // 删除模式与选中 ID
@@ -497,6 +601,18 @@ const baseColumns: DataTableColumns<VideoItem> = [
               onClick: () => openEditModal(row)
             },
             { default: () => '编辑' }
+          )
+        )
+
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => openLocationModal(row)
+            },
+            { default: () => '位置信息' }
           )
         )
       }
