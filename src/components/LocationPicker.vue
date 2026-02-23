@@ -80,7 +80,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { NInput, NInputGroup, NInputGroupLabel, NButton } from 'naive-ui'
-import { wgs84ToGcj02, gcj02ToWgs84 } from '../utils/coordTransform'
+import { wgs84ToGcj02, gcj02ToWgs84, isInChina } from '../utils/coordTransform'
 
 delete (L.Icon.Default.prototype as any)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -124,20 +124,33 @@ const activeLayer = ref<string>(props.defaultLayer) // 用 prop 初始化，不�
 const mapHeight = computed(() => props.height)
 const mapZoom = ref(props.defaultZoom)
 
-// 将 WGS-84 转为当前底图坐标系用于显示
+// 存储策略：国内坐标以 GCJ-02 存储，境外坐标以 WGS-84 存储。
+// 读取时根据坐标是否在中国 + 当前底图决定是否需要转换。
 function toDisplayCoord(lat: number, lng: number): { lat: number; lng: number } {
-  if (activeLayer.value === '高德地图') {
+  const inChina = isInChina(lng, lat)
+  if (inChina && activeLayer.value !== '高德地图') {
+    // 存储的是 GCJ-02，OSM 需要 WGS-84
+    const [wLng, wLat] = gcj02ToWgs84(lng, lat)
+    return { lat: wLat, lng: wLng }
+  }
+  if (!inChina && activeLayer.value === '高德地图') {
+    // 存储的是 WGS-84，高德需要 GCJ-02
     const [gLng, gLat] = wgs84ToGcj02(lng, lat)
     return { lat: gLat, lng: gLng }
   }
   return { lat, lng }
 }
 
-// 将当前底图坐标系转回 WGS-84 用于存储
-function toWgs84(lat: number, lng: number): { lat: number; lng: number } {
+// 将地图返回的坐标转为存储格式（国内→GCJ-02，境外→WGS-84）
+function toStoreCoord(lat: number, lng: number): { lat: number; lng: number } {
   if (activeLayer.value === '高德地图') {
-    const [wLng, wLat] = gcj02ToWgs84(lng, lat)
-    return { lat: wLat, lng: wLng }
+    // 高德返回 GCJ-02；境外 GCJ-02 == WGS-84（identity），直接存储均正确
+    return { lat, lng }
+  }
+  // OSM 返回 WGS-84；国内需转为 GCJ-02 存储
+  if (isInChina(lng, lat)) {
+    const [gLng, gLat] = wgs84ToGcj02(lng, lat)
+    return { lat: gLat, lng: gLng }
   }
   return { lat, lng }
 }
@@ -207,17 +220,9 @@ function onMapReady() {
         activeLayer.value = newLayer
 
         if (props.modelValue) {
-          let displayLat: number, displayLng: number
-          if (newLayer === '高德地图') {
-            const [gLng, gLat] = wgs84ToGcj02(props.modelValue.lng, props.modelValue.lat)
-            displayLat = gLat
-            displayLng = gLng
-          } else {
-            displayLat = props.modelValue.lat
-            displayLng = props.modelValue.lng
-          }
+          const d = toDisplayCoord(props.modelValue.lat, props.modelValue.lng)
           setTimeout(() => {
-            map.setView([displayLat, displayLng], map.getZoom(), { animate: false })
+            map.setView([d.lat, d.lng], map.getZoom(), { animate: false })
           }, 50)
         }
       })
@@ -226,8 +231,8 @@ function onMapReady() {
 
   map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
     const { lat, lng } = e.latlng
-    const wgs = toWgs84(lat, lng)
-    emitPosition({ lat: wgs.lat, lng: wgs.lng })
+    const stored = toStoreCoord(lat, lng)
+    emitPosition({ lat: stored.lat, lng: stored.lng })
   })
 }
 
@@ -242,8 +247,8 @@ onBeforeUnmount(() => {
 // 关键：使用 dragend，而不是 update:lat-lng，避免与受控 :lat-lng 形成循环
 function onMarkerDragEnd(e: any) {
   const latlng = e.target.getLatLng()
-  const wgs = toWgs84(latlng.lat, latlng.lng)
-  emitPosition({ lat: wgs.lat, lng: wgs.lng })
+  const stored = toStoreCoord(latlng.lat, latlng.lng)
+  emitPosition({ lat: stored.lat, lng: stored.lng })
 }
 
 function applyCoordInput() {
