@@ -97,7 +97,7 @@
                   :class="{ 'selected-card': (isBatchMode || isCollection)&&isCardSelected(img.id) }">
                     <n-flex vertical>
                       <n-flex justify="center" class="image-container">
-                        <n-image :src="img.imageUrl" width="100%" height="150px" object-fit="cover"   @click="handleImageClick"
+                        <n-image :src="toMediumUrl(img.imageUrl)" width="100%" height="150px" object-fit="cover"   @click="handleImageClick"
                         :preview-disabled="isBatchMode || isCollection"
                         />
                         <!-- 状态遮罩 -->
@@ -129,7 +129,7 @@
               <n-card size="small" hoverable @click="handleCardClick(img, $event)">
                 <n-flex vertical>
                   <n-flex justify="center" class="image-container">
-                    <n-image :src="img.imageUrl" width="100%" height="150px" object-fit="cover"
+                    <n-image :src="toMediumUrl(img.imageUrl)" width="100%" height="150px" object-fit="cover"
                       @click="handleImageClick"
                       :preview-disabled="isBatchMode || isCollection"
                     />
@@ -237,6 +237,26 @@
     </n-flex>
   </n-modal>
 
+  <!-- EXIF 信息弹窗 -->
+  <n-modal
+    v-model:show="showExifModal"
+    title="EXIF 摄影元数据"
+    preset="card"
+    style="width: 50vw;"
+    :mask-closable="false"
+  >
+    <n-flex vertical>
+      <div v-if="exifTarget" style="margin-bottom: 8px;">
+        当前图片：{{ exifTarget.title || exifTarget.fileName }}
+      </div>
+      <ExifEditor v-model="exifData" :loading="exifLoading" />
+      <n-flex justify="end" style="margin-top: 12px;">
+        <n-button @click="showExifModal = false">取消</n-button>
+        <n-button type="primary" @click="handleSaveExif" :loading="exifLoading">保存</n-button>
+      </n-flex>
+    </n-flex>
+  </n-modal>
+
   <!-- 编辑合集弹窗 -->
 <n-modal v-model:show="showEditCollectionModal" title="选择合集" preset="dialog">
   <template #icon>
@@ -287,6 +307,9 @@ import { useRoute } from 'vue-router'
 import LocationPicker from '../components/LocationPicker.vue'
 import type { LocationPoint } from '../components/LocationPicker.vue'
 import { fetchImageLocation, updateImageLocation } from '../api/location'
+import ExifEditor from '../components/ExifEditor.vue'
+import type { ExifData } from '../api/exif'
+import { fetchImageExif, updateImageExif } from '../api/exif'
 
 const showModal = ref(false)
 const imageManagerStore = useImageManagerStore()
@@ -365,6 +388,11 @@ const imageLocationPoint = computed<LocationPoint | null>({
   }
 })
 
+const showExifModal = ref(false)
+const exifLoading = ref(false)
+const exifTarget = ref<ImageItem | null>(null)
+const exifData = ref<ExifData>({})
+
 const baseColumns: DataTableColumns<ImageItem> = [
   { title: '文件名', key: 'fileName', width: 300 },
   { title: '标题', key: 'title' },
@@ -410,7 +438,7 @@ const baseColumns: DataTableColumns<ImageItem> = [
   {
     title: '操作',
     key: 'actions',
-    width: 220,
+    width: 310,
     render(row) {
       const buttons = []
       
@@ -453,6 +481,18 @@ const baseColumns: DataTableColumns<ImageItem> = [
               onClick: () => openImageLocationModal(row)
             },
             { default: () => '位置信息' }
+          )
+        )
+
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => openExifModal(row)
+            },
+            { default: () => 'EXIF信息' }
           )
         )
       }
@@ -744,9 +784,12 @@ async function handleRetry(imageId: number) {
 }
 const thumbUrl = computed(() => {
   if (!modal.imageUrl) return ''
-  // 将 /raw/xxx 替换为 /thumb/thumb.jpg
-  return modal.imageUrl.replace(/\/raw\/[^/]+$/, '/thumb/thumb.jpg')
+  return modal.imageUrl.replace(/\/raw\/[^/]+$/, '/medium/medium.jpg')
 })
+
+function toMediumUrl(url: string): string {
+  return url.replace(/\/raw\/[^/]+$/, '/medium/medium.jpg')
+}
 
 function openImageLocationModal(row: ImageItem) {
   imageLocationTarget.value = row
@@ -763,6 +806,48 @@ function openImageLocationModal(row: ImageItem) {
     })
     .catch(() => {
       message.error('获取位置信息失败')
+    })
+}
+
+function openExifModal(row: ImageItem) {
+  exifTarget.value = row
+  exifData.value = {}
+  exifLoading.value = true
+  showExifModal.value = true
+
+  fetchImageExif(row.uuid)
+    .then((data) => {
+      if (data) {
+        exifData.value = data
+      } else {
+        message.info('该图片尚无 EXIF 数据，可直接填写')
+      }
+    })
+    .catch(() => {
+      message.error('获取 EXIF 信息失败')
+    })
+    .finally(() => {
+      exifLoading.value = false
+    })
+}
+
+function handleSaveExif() {
+  if (!exifTarget.value) {
+    showExifModal.value = false
+    return
+  }
+
+  exifLoading.value = true
+  updateImageExif(exifTarget.value.uuid, exifData.value)
+    .then(() => {
+      message.success('EXIF 信息已更新')
+      showExifModal.value = false
+    })
+    .catch(() => {
+      message.error('更新 EXIF 信息失败')
+    })
+    .finally(() => {
+      exifLoading.value = false
     })
 }
 
