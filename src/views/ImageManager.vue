@@ -149,6 +149,13 @@
                   </n-flex>
                 </n-flex>
               </n-card>
+              <div class="card-action-trigger" @click.stop>
+                <n-dropdown trigger="click" :options="getCardActions(img)" @select="(key: string) => handleCardAction(key, img)" placement="bottom-end">
+                  <n-button text size="small">
+                    <n-icon size="18"><EllipsisVertical /></n-icon>
+                  </n-button>
+                </n-dropdown>
+              </div>
             </div>
           </n-grid-item>
         </n-grid>
@@ -296,9 +303,9 @@
 import { onMounted, ref ,h, reactive, computed} from 'vue'
 import { fetchImages ,deleteImage, updateImage, fetchCollectionsWithImageId, addImagesToCollections, removeImagesFromCollections, fetchImagesWithCollectionId} from '../api/images'
 import type { DataTableColumns } from 'naive-ui'
-import { NButton ,NPopconfirm, useMessage, NTag, NSpin, NFlex} from 'naive-ui'
+import { NButton ,NPopconfirm, useMessage, useDialog, NTag, NSpin, NFlex} from 'naive-ui'
 import type { ImageItem, CollectionResponse } from '../api/images'
-import {GridOutline, CloseOutline} from '@vicons/ionicons5'
+import {GridOutline, CloseOutline, EllipsisVertical} from '@vicons/ionicons5'
 import {List20Filled, CollectionsAdd24Regular} from '@vicons/fluent'
 import { fetchImageCollectionsIds } from '../api/manager'
 import {useImageManagerStore} from '../stores/imageManager'
@@ -321,6 +328,7 @@ const isBatchMode = ref(false) // 批量操作模式
 const images = ref<ImageItem[]>([])
 
 const message = useMessage()
+const dialog = useDialog()
 
 // 已选中的行 key（这里用 id）
 const checkedRowKeys = ref<number[]>([])
@@ -791,6 +799,41 @@ function toMediumUrl(url: string): string {
   return url.replace(/\/raw\/[^/]+$/, '/medium/medium.jpg')
 }
 
+function getCardActions(img: ImageItem) {
+  const options: any[] = []
+  if (img.status === 'failed') {
+    options.push({ label: '重试', key: 'retry' })
+  }
+  if (!img.status || img.status === 'done' || img.status === 'pending') {
+    options.push(
+      { label: '编辑', key: 'edit' },
+      { label: '位置信息', key: 'location' },
+      { label: 'EXIF信息', key: 'exif' },
+    )
+  }
+  options.push({ type: 'divider', key: 'd1' })
+  options.push({ label: '删除', key: 'delete', props: { style: { color: '#d03050' } } })
+  return options
+}
+
+function handleCardAction(key: string | number, img: ImageItem) {
+  switch (key) {
+    case 'edit': handleEdit(img); break
+    case 'location': openImageLocationModal(img); break
+    case 'exif': openExifModal(img); break
+    case 'retry': handleRetry(img.id); break
+    case 'delete':
+      dialog.warning({
+        title: '确认删除',
+        content: '确认要删除这张图片吗？',
+        positiveText: '删除',
+        negativeText: '取消',
+        onPositiveClick: () => handleDelete(img.id)
+      })
+      break
+  }
+}
+
 function openImageLocationModal(row: ImageItem) {
   imageLocationTarget.value = row
   imageLocationString.value = ''
@@ -948,5 +991,22 @@ function handleSaveImageLocation() {
 /* 确保卡片包装器没有额外的定位 */
 .image-card-wrapper {
   position: relative;
+}
+
+.card-action-trigger {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 11;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 4px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.image-card-wrapper:hover .card-action-trigger {
+  opacity: 1;
 }
 </style>

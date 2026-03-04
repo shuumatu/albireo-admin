@@ -1,6 +1,7 @@
 <template>
   <n-config-provider :locale="zhCN" :date-locale="dateZhCN">
     <n-loading-bar-provider>
+      <n-dialog-provider>
       <n-message-provider>
         <n-layout>
           <n-layout-header bordered>
@@ -15,6 +16,7 @@
           </n-layout-content>
         </n-layout>
       </n-message-provider>
+      </n-dialog-provider>
     </n-loading-bar-provider>
   </n-config-provider>
 </template>
