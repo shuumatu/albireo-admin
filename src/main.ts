@@ -9,7 +9,7 @@ import VueDragSelect from "@coleqiu/vue-drag-select";
 
 import './assets/styles/fonts.css'
 
-axios.defaults.baseURL = 'http://localhost:8080'
+axios.defaults.baseURL = ''
 
 const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate) // 注册持久化插件

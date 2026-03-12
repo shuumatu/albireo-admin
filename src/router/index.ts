@@ -8,8 +8,16 @@ import CollectionDetail from '../views/CollectionDetail.vue'
 import ImageManager from '../views/ImageManager.vue'
 import TagManager from '../views/TagManager.vue'
 import SystemConfigManager from '../views/SystemConfigManager.vue'
+import LoginPage from '../views/LoginPage.vue'
+import UserProfile from '../views/UserProfile.vue'
 
 const routes = [
+    {
+        path: '/login',
+        name: 'login',
+        component: LoginPage,
+        meta: { public: true }
+    },
     {
         path: '/',
         name: 'home',
@@ -59,14 +67,33 @@ const routes = [
         path: '/map',
         name:'map',
         component: Map
+    },
+    {
+        path: '/profile',
+        name: 'profile',
+        meta: { title: '个人设置' },
+        component: UserProfile
     }
-
-
 ]
 
 const router = createRouter({
-  history: createWebHistory(), // 使用 HTML5 模式
+  history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, _from, next) => {
+  const token = localStorage.getItem('token')
+  if (to.meta.public) {
+    if (token && to.name === 'login') {
+      next('/')
+    } else {
+      next()
+    }
+  } else if (!token) {
+    next('/login')
+  } else {
+    next()
+  }
 })
 
 export default router

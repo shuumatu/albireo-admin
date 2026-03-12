@@ -3,7 +3,13 @@
     <n-loading-bar-provider>
       <n-dialog-provider>
       <n-message-provider>
-        <n-layout>
+        <!-- 登录页：不显示布局框架 -->
+        <template v-if="isLoginPage">
+          <router-view />
+        </template>
+
+        <!-- 其他页面：显示完整布局 -->
+        <n-layout v-else>
           <n-layout-header bordered>
             <AppHeader />
             <Breadcrumb v-if="$route.meta && $route.meta.title"/>
@@ -22,9 +28,14 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { zhCN, dateZhCN } from 'naive-ui'
 import AppHeader from './components/AppHeader.vue'
 import Breadcrumb from './components/Breadcrumb.vue'
+
+const route = useRoute()
+const isLoginPage = computed(() => route.name === 'login')
 </script>
 
 <style scoped>

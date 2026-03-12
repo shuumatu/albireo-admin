@@ -77,7 +77,7 @@ const customUpload = async ({ file }: { file: any }) => {
     console.log('文件对象:', actualFile)
     
     // 获取预签名URL
-    const { data } = await axios.post('http://localhost:8081/api/upload-url', {
+    const { data } = await axios.post('/api/upload/api/upload-url', {
       fileName: fileDisplayName,
       fileType: fileType,
     })
