@@ -55,6 +55,22 @@
           <n-input v-model:value="form.description" placeholder="请输入描述" type="textarea" />
         </n-form-item>
 
+        <n-form-item label="拍摄时间" path="shotAt">
+          <n-date-picker
+            v-model:value="shotAtTimestamp"
+            type="datetime"
+            clearable
+            style="width: 100%"
+          />
+        </n-form-item>
+        <n-form-item label="可见性" path="visibility">
+          <n-select
+            v-model:value="form.visibility"
+            :options="visibilityOptions"
+            placeholder="请选择可见性"
+          />
+        </n-form-item>
+
         <n-form-item label="文件名" path="fileName">
           <n-input v-model:value="form.fileName" placeholder="文件名" disabled />
         </n-form-item>
@@ -221,7 +237,7 @@ interface VideoItem {
   title: string | null
   description: string | null
   location: string | null
-  shootTime: string | null
+  shotAt: string | null
   fileName: string
   objectKey: string
   presignUrl: string
@@ -681,7 +697,7 @@ const form = reactive<VideoItem& { collectionIds: number[]; tags: { id: number; 
   title: '',
   description: '',
   location: '',
-  shootTime: '',
+  shotAt: null,
   fileName: '',
   objectKey: '',
   presignUrl: '',
@@ -700,6 +716,19 @@ const form = reactive<VideoItem& { collectionIds: number[]; tags: { id: number; 
 const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }]
 }
+
+const shotAtTimestamp = computed<number | null>({
+  get: () => form.shotAt ? new Date(form.shotAt).getTime() : null,
+  set: (v: number | null) => {
+    form.shotAt = v ? new Date(v).toISOString() : null
+  }
+})
+
+const visibilityOptions = [
+  { label: '私密', value: 'private' },
+  { label: '好友可见', value: 'friends' },
+  { label: '公开', value: 'public' }
+]
 
 type SimpleTag = { id: number; name: string }
 
@@ -734,7 +763,12 @@ async function handleSubmit() {
         const added = newIds.filter(id => !oldSet.has(id))
         const removed = oldIds.filter(id => !newSet.has(id))
 
-        await updateVideo(form.id, { title: form.title ?? '', description: form.description ?? ''})
+        await updateVideo(form.id, {
+          title: form.title ?? '',
+          description: form.description ?? '',
+          shotAt: form.shotAt,
+          visibility: form.visibility
+        })
 
         if (added.length > 0) {
           await addVideosToCollections({

@@ -62,7 +62,7 @@ interface CollectionWithCoverResponse {
 
 
 export function fetchVideoList(params: VideoListParams ) {
-  return request.get<VideoListResponse>('/video/get-videos-v2', { params })
+  return request.get<VideoListResponse>('/video/get-videos', { params })
 }
 
 export function fetchCollectionsIds(): Promise<CollectionItem[]> {
@@ -121,6 +121,8 @@ export function deleteVideos(videoIds: number[]){
 interface VideoParams {
   title: string;
   description: string;
+  shotAt?: string | null;
+  visibility?: string | null;
 }
 
 
