@@ -207,7 +207,7 @@ import type { VideoListResponse } from '../api/manager'
 import { CloseOutline } from '@vicons/ionicons5'
 import {CollectionsAdd24Regular} from '@vicons/fluent'
 import { useCollectionStore } from '../stores/collection'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   fetchTagsWithVideoId,
   fetchTags as fetchAllTags,
@@ -313,6 +313,7 @@ async function loadVideoList() {
 }
 
 const route = useRoute()
+const router = useRouter()
 
 onMounted(() => {
   if (route.path === '/manager/video') {
@@ -629,6 +630,21 @@ const baseColumns: DataTableColumns<VideoItem> = [
               onClick: () => openLocationModal(row)
             },
             { default: () => '位置信息' }
+          )
+        )
+
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => router.push({
+                path: '/manager/comment',
+                query: { targetType: 'video', targetId: row.uuid }
+              })
+            },
+            { default: () => '评论' }
           )
         )
       }

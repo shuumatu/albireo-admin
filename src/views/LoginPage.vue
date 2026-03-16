@@ -8,7 +8,7 @@
           alt="Logo"
           class="login-logo"
         />
-        <h1 class="login-title">Albireo 管理后台</h1>
+        <h1 class="login-title">管理后台</h1>
         <p class="login-subtitle">管理员登录</p>
       </div>
 

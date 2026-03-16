@@ -310,7 +310,7 @@ import {List20Filled, CollectionsAdd24Regular} from '@vicons/fluent'
 import { fetchImageCollectionsIds } from '../api/manager'
 import {useImageManagerStore} from '../stores/imageManager'
 import { useCollectionDetailStore } from '../stores/collection'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import LocationPicker from '../components/LocationPicker.vue'
 import type { LocationPoint } from '../components/LocationPicker.vue'
 import { fetchImageLocation, updateImageLocation } from '../api/location'
@@ -353,6 +353,7 @@ async function fetchPageData() {
   itemCount.value = res.total
 }
 const route = useRoute()
+const router = useRouter()
 
 
 onMounted(async () => {
@@ -501,6 +502,21 @@ const baseColumns: DataTableColumns<ImageItem> = [
               onClick: () => openExifModal(row)
             },
             { default: () => 'EXIF信息' }
+          )
+        )
+
+        buttons.push(
+          h(
+            NButton,
+            {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => router.push({
+                path: '/manager/comment',
+                query: { targetType: 'image', targetId: row.uuid }
+              })
+            },
+            { default: () => '评论' }
           )
         )
       }

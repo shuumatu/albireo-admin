@@ -8,6 +8,7 @@ import CollectionDetail from '../views/CollectionDetail.vue'
 import ImageManager from '../views/ImageManager.vue'
 import TagManager from '../views/TagManager.vue'
 import SystemConfigManager from '../views/SystemConfigManager.vue'
+import CommentManager from '../views/CommentManager.vue'
 import LoginPage from '../views/LoginPage.vue'
 import UserProfile from '../views/UserProfile.vue'
 
@@ -56,6 +57,12 @@ const routes = [
         name: 'tagManager',
         meta: { title: '标签管理' },
         component:TagManager
+    },
+    {
+        path: '/manager/comment',
+        name: 'commentManager',
+        meta: { title: '评论管理' },
+        component: CommentManager
     },
     {
         path: '/manager/system-config',

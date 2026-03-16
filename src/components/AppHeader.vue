@@ -83,6 +83,10 @@ const menuOptions = [
         key: '/manager/tag'
       },
       {
+        label: '评论管理',
+        key: '/manager/comment'
+      },
+      {
         label: '系统配置',
         key: '/manager/system-config'
       }
