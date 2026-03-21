@@ -57,71 +57,129 @@
 import { ref } from 'vue'
 import { useMessage, NIcon } from 'naive-ui'
 import { CloudUploadOutline } from '@vicons/ionicons5'
-
-import axios from 'axios'
+import { initiateUpload, getParts, getUploadUrl, completeUpload, completeDirectUpload } from '../api/upload'
 
 const uploadProgress = ref(0)
 const uploadedUrl = ref('')
 const fileName = ref('')
 const message = useMessage()
 
+function computeHash(file: File, chunkSize: number = 4 * 1024 * 1024): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("../workers/fileHashWorker.ts", import.meta.url), { type: "module" })
+    worker.onmessage = (e) => {
+      const { status, hash, error } = e.data
+      if (status === "done") {
+        resolve(hash)
+        worker.terminate()
+      } else if (status === "error") {
+        reject(error)
+        worker.terminate()
+      }
+    }
+    worker.postMessage({ file, chunkSize })
+  })
+}
+
+function getFileType(file: File, fileName: string): string {
+  let fileType = file.type || ""
+  if (!fileType || fileType === "unknown") {
+    const ext = fileName.split('.').pop()?.toLowerCase()
+    const mimeTypes: Record<string, string> = {
+      'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+      'gif': 'image/gif', 'webp': 'image/webp', 'heic': 'image/heic',
+      'heif': 'image/heif', 'mp4': 'video/mp4', 'mov': 'video/quicktime',
+      'mkv': 'video/x-matroska', 'webm': 'video/webm', 'avi': 'video/x-msvideo',
+    }
+    fileType = mimeTypes[ext || ''] || 'application/octet-stream'
+  }
+  return fileType
+}
+
 const customUpload = async ({ file }: { file: any }) => {
   try {
-    // 处理 Naive UI 的文件对象格式
-    const actualFile = file.file || file
+    const actualFile: File = file.file || file
     const fileDisplayName = actualFile.name || file.name
-    const fileSize = actualFile.size || file.size || 0
-    const fileType = actualFile.type || file.type || 'application/octet-stream'
-    
-    console.log('开始上传文件:', fileDisplayName, '大小:', fileSize, '类型:', fileType)
-    console.log('文件对象:', actualFile)
-    
-    // 获取预签名URL
-    const { data } = await axios.post('/api/upload/api/upload-url', {
+    const fileType = getFileType(actualFile, fileDisplayName)
+
+    console.log('开始上传文件:', fileDisplayName, '大小:', actualFile.size, '类型:', fileType)
+
+    const fileHash = await computeHash(actualFile)
+    console.log('文件哈希:', fileHash)
+
+    const init = await initiateUpload({
       fileName: fileDisplayName,
-      fileType: fileType,
+      fileType,
+      fileSize: actualFile.size,
+      fileHash,
     })
-    
-    console.log('获取到预签名URL:', data.url)
 
-    // 上传文件到存储桶
-    const uploadResponse = await axios.put(data.url, actualFile, {
-      headers: {
-        'Content-Type': fileType,
-        // 移除 Content-Length，让浏览器自动设置
-      },
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-        }
-      },
+    if (init.alreadyExists && !init.url) {
+      console.log('文件已存在，跳过上传')
+      message.success('文件已存在，秒传成功')
+      uploadProgress.value = 100
+      fileName.value = fileDisplayName
+      return
+    }
+
+    if (init.alreadyExists && init.url || init.directUpload && init.url) {
+      console.log('直传模式:', init.url)
+      const resp = await fetch(init.url, { method: 'PUT', body: actualFile })
+      if (!resp.ok) throw new Error('直接上传失败')
+      await completeDirectUpload({ fileHash, objectKey: init.key, fileType })
+      message.success('上传成功')
+      uploadProgress.value = 100
+      fileName.value = fileDisplayName
+      return
+    }
+
+    // 分片上传
+    const partSize = init.partSize
+    const parts: { partNumber: number; start: number; end: number }[] = []
+    let partNumber = 1
+    for (let offset = 0; offset < actualFile.size; offset += partSize, partNumber++) {
+      parts.push({ partNumber, start: offset, end: Math.min(offset + partSize, actualFile.size) })
+    }
+
+    const listed = await getParts({ key: init.key, uploadId: init.uploadId })
+    const uploadedSet = new Set(listed.parts.map(p => p.partNumber))
+    const uploadedParts = [...listed.parts]
+    const totalParts = parts.length
+
+    for (const part of parts) {
+      if (uploadedSet.has(part.partNumber)) continue
+
+      const { url } = await getUploadUrl({ key: init.key, uploadId: init.uploadId, partNumber: part.partNumber })
+      const blob = actualFile.slice(part.start, part.end)
+      const resp = await fetch(url, {
+        method: 'PUT',
+        body: blob,
+        headers: fileType ? { 'Content-Type': fileType } : undefined,
+      })
+      if (!resp.ok) throw new Error(`分片 ${part.partNumber} 上传失败`)
+
+      const eTag = (resp.headers.get('etag') || '').replaceAll('"', '')
+      uploadedParts.push({ partNumber: part.partNumber, eTag })
+      uploadedSet.add(part.partNumber)
+      uploadProgress.value = Math.min(99, Math.floor((uploadedParts.length / totalParts) * 100))
+    }
+
+    uploadedParts.sort((a, b) => a.partNumber - b.partNumber)
+    await completeUpload({
+      hash: fileHash,
+      key: init.key,
+      uploadId: init.uploadId,
+      fileType,
+      parts: uploadedParts,
     })
-    
-    console.log('上传响应:', uploadResponse.status, uploadResponse.statusText)
 
-    // 构建访问URL（使用自定义域名）
-    const cloudflareUrl = data.url.split('?')[0]
-    const objectKey = data.key || cloudflareUrl.split('/uploads/')[1]
-    const accessUrl = `https://albireo.shuumatu.com/${objectKey}`
-    console.log('访问URL:', accessUrl)
-    
     message.success('上传成功')
-    uploadedUrl.value = accessUrl
-    fileName.value = fileDisplayName
     uploadProgress.value = 100
-    
+    fileName.value = fileDisplayName
+
   } catch (err: any) {
     console.error('上传错误:', err)
-    if (err.response) {
-      console.error('错误响应:', err.response.status, err.response.data)
-      message.error(`上传失败: ${err.response.status} - ${err.response.data?.message || '未知错误'}`)
-    } else if (err.request) {
-      console.error('请求错误:', err.request)
-      message.error('上传失败: 网络请求错误')
-    } else {
-      console.error('其他错误:', err.message)
-      message.error(`上传失败: ${err.message}`)
-    }
+    message.error(`上传失败: ${err.message || '未知错误'}`)
     uploadProgress.value = 0
   }
 }

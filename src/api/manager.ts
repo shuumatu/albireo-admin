@@ -66,20 +66,20 @@ export function fetchVideoList(params: VideoListParams ) {
 }
 
 export function fetchCollectionsIds(): Promise<CollectionItem[]> {
-  return request.get('/collection/get-collections')
+  return request.get('/collection/video/list')
 }
 
 export function fetchImageCollectionsIds(): Promise<CollectionItem[]> {
-  return request.get('/collection/get-image-collections')
+  return request.get('/collection/image/list')
 }
 
 export function addVideosToCollections(params: CollectionsParams ) {
-  return request.post('/collection/add-to-collections', params)
+  return request.post('/collection/video/batch-add', params)
 }
 
 //暂时没被使用
 export function UpdateVideoCollections(params: CollectionParams ) {
-  return request.post('/collection/update-collections', params)
+  return request.put('/collection/video/video-collections', params)
 }
 
 
@@ -94,11 +94,11 @@ interface CollectionsManagerResponse {
 
 
 export function fetchCollections(params:CollectionsManagerParams={}){
-  return request.get<CollectionsManagerResponse[]>('/collection/manager-get', { params })
+  return request.get<CollectionsManagerResponse[]>('/collection/video/manager-list', { params })
 }
 
 export function fetchImageCollections(params:CollectionsManagerParams={}){
-  return request.get<CollectionsManagerResponse[]>('/collection/image-manager-get', { params })
+  return request.get<CollectionsManagerResponse[]>('/collection/image/manager-list', { params })
 }
 
 // 添加获取合集视频的接口函数
@@ -107,11 +107,11 @@ export function fetchVideosByCollection(params: CollectionVideosParams) {
 }
 
 export function fetchCollectionWithCover(collectionId: number){
-  return request.get<CollectionWithCoverResponse>('/collection/get-collection-with-cover', { params: { collectionId } })
+  return request.get<CollectionWithCoverResponse>(`/collection/video/${collectionId}`)
 }
 
 export function fetchImageCollectionWithCover(collectionId: number){
-  return request.get<CollectionWithCoverResponse>('/collection/get-image-collection-with-cover', { params: { collectionId } })
+  return request.get<CollectionWithCoverResponse>(`/collection/image/${collectionId}`)
 }
 
 export function deleteVideos(videoIds: number[]){
@@ -130,7 +130,10 @@ export function updateVideo(videoId: number, params: VideoParams)
 { return request.post(`/video/update-video/${videoId}`, params) }
 
 export function removeVideosFromCollections(params: CollectionsParams)
-{ return request.post('/collection/remove-from-collections', params)}
+{ return request.delete('/collection/video/batch-remove', { data: params })}
+
+export function removeImagesFromCollections(params: { collectionIds: number[], imageIds: number[] })
+{ return request.delete('/collection/image/batch-remove', { data: params })}
 
 interface addCollection{
   name: string;
@@ -138,9 +141,9 @@ interface addCollection{
 }
 
 export function addVideoCollection(params: addCollection){
-  return request.post('/collection/add-video-collection', params)
+  return request.post('/collection/video', params)
 }
 
 export function addImageCollection(params: addCollection){
-  return request.post('/collection/add-image-collection', params)
+  return request.post('/collection/image', params)
 }

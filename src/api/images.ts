@@ -49,18 +49,18 @@ interface CollectionsParams
 { imageIds: (number)[], collectionIds: (number)[] }
 
 export function addImagesToCollections(params: CollectionsParams) {
-  return request.post(`/collection/image/add-to-collections`,params);
+  return request.post(`/collection/image/batch-add`, params);
 }
 
 export function removeImagesFromCollections(params: CollectionsParams) {
-  return request.post(`/collection/image/remove-from-collections`,params);
+  return request.delete(`/collection/image/batch-remove`, { data: params });
 }
 
 export interface CollectionResponse
 { id: number, name:string }
 
 export function fetchCollectionsWithImageId(imageId: number):Promise<CollectionResponse[]>{
-  return request.get(`/collection/get-collections-with-image-id`, { params: {imageId} });
+  return request.get(`/collection/image/by-image`, { params: {imageId} });
 }
 
 export function deleteImages(imageIds: number[]) {

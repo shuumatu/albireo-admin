@@ -9,6 +9,7 @@ import ImageManager from '../views/ImageManager.vue'
 import TagManager from '../views/TagManager.vue'
 import SystemConfigManager from '../views/SystemConfigManager.vue'
 import CommentManager from '../views/CommentManager.vue'
+import ShareManager from '../views/ShareManager.vue'
 import LoginPage from '../views/LoginPage.vue'
 import UserProfile from '../views/UserProfile.vue'
 
@@ -63,6 +64,12 @@ const routes = [
         name: 'commentManager',
         meta: { title: '评论管理' },
         component: CommentManager
+    },
+    {
+        path: '/manager/share',
+        name: 'shareManager',
+        meta: { title: '分享管理' },
+        component: ShareManager
     },
     {
         path: '/manager/system-config',

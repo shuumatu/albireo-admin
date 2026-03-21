@@ -87,6 +87,10 @@ const menuOptions = [
         key: '/manager/comment'
       },
       {
+        label: '分享管理',
+        key: '/manager/share'
+      },
+      {
         label: '系统配置',
         key: '/manager/system-config'
       }

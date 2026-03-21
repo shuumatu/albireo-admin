@@ -1,7 +1,30 @@
-import request from "../utils/request";
+import axios from "axios";
+
 const UPLOAD_API_BASE = import.meta.env.VITE_UPLOAD_API_BASE as string;
 
+const uploadRequest = axios.create({
+  baseURL: UPLOAD_API_BASE,
+  timeout: 30000,
+});
 
+uploadRequest.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+uploadRequest.interceptors.response.use(
+  (response) => response.data,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
 
 interface InitiateParams {
   fileName: string;
@@ -27,7 +50,7 @@ interface InitiateResponse{
 }
 
 export function initiateUpload(params: InitiateParams):Promise<InitiateResponse>{
-  return request.post(`${UPLOAD_API_BASE}/multipart/initiate`,params)
+  return uploadRequest.post("/multipart/initiate",params)
 }
 
 
@@ -48,7 +71,7 @@ interface ListUploadedPartsResponse{
 }
 
 export function getParts(params:PartsParams):Promise<ListUploadedPartsResponse>{
-  return request.get(`${UPLOAD_API_BASE}/multipart/list-parts`,{params})
+  return uploadRequest.get("/multipart/list-parts",{params})
 }
 
 interface UrlRequestParams{
@@ -64,7 +87,7 @@ interface PartUrlResponse{
 
 
 export function getUploadUrl(params:UrlRequestParams):Promise<PartUrlResponse>{
-  return request.post(`${UPLOAD_API_BASE}/multipart/part-url`,params);
+  return uploadRequest.post("/multipart/part-url",params);
 }
 
 interface CompleteUploadParams{
@@ -76,7 +99,7 @@ interface CompleteUploadParams{
 }
 
 export function completeUpload(params:CompleteUploadParams):Promise<void>{
-  return request.post(`${UPLOAD_API_BASE}/multipart/complete`,params)
+  return uploadRequest.post("/multipart/complete",params)
 }
 
 
@@ -86,5 +109,5 @@ export interface CompleteDirectUploadParams{
   fileType:string;
 }
 export function completeDirectUpload(params:CompleteDirectUploadParams):Promise<void>{
-  return request.post(`${UPLOAD_API_BASE}/complete-direct-upload`,params)
+  return uploadRequest.post("/complete-direct-upload",params)
 }
