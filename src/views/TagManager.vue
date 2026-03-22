@@ -100,10 +100,9 @@ const columns: DataTableColumns<TagItem> = [
     title: '操作',
     key: 'actions',
     render(row) {
-      return [
+      return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px;' }, [
         h(NButton, {
           size: 'small',
-          style: { marginRight: '8px' },
           onClick: () => handleEdit(row)
         }, { default: () => '编辑' }),
         h(NPopconfirm, {
@@ -117,7 +116,7 @@ const columns: DataTableColumns<TagItem> = [
             type: 'error'
           }, { default: () => '删除' })
         })
-      ]
+      ])
     }
   }
 ]

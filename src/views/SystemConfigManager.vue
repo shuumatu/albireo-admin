@@ -263,12 +263,11 @@ const columns: DataTableColumns<SystemConfigVO> = [
     key: 'actions',
     width: 180,
     render(row) {
-      return [
+      return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px;' }, [
         h(
           NButton,
           {
             size: 'small',
-            style: { marginRight: '8px' },
             onClick: () => handleEdit(row)
           },
           { default: () => '编辑' }
@@ -293,7 +292,7 @@ const columns: DataTableColumns<SystemConfigVO> = [
               )
           }
         )
-      ]
+      ])
     }
   }
 ]

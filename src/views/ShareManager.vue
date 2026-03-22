@@ -243,6 +243,7 @@
 import { ref, computed, h, onMounted, watch } from 'vue'
 import {
   NButton,
+  NDropdown,
   NTag,
   NPopconfirm,
   NIcon,
@@ -645,13 +646,23 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 280,
+    width: 160,
     render(row) {
-      return h('div', { style: 'display: flex; gap: 6px; flex-wrap: wrap;' }, [
-        h(NButton, { size: 'small', onClick: () => copyUrl(row.shareUrl) }, { default: () => '复制链接' }),
-        h(NButton, { size: 'small', onClick: () => showQR(row) }, { default: () => '二维码' }),
-        h(NButton, { size: 'small', onClick: () => openStatsModal(row.id) }, { default: () => '统计' }),
+      const moreOptions = [
+        { label: '复制链接', key: 'copy' },
+        { label: '二维码', key: 'qr' },
+        { label: '统计', key: 'stats' }
+      ]
+      const handleMoreSelect = (key: string) => {
+        if (key === 'copy') copyUrl(row.shareUrl)
+        else if (key === 'qr') showQR(row)
+        else if (key === 'stats') openStatsModal(row.id)
+      }
+      return h('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
         h(NButton, { size: 'small', onClick: () => openEditModal(row) }, { default: () => '编辑' }),
+        h(NDropdown, { trigger: 'click', options: moreOptions, onSelect: handleMoreSelect }, {
+          default: () => h(NButton, { size: 'small' }, { default: () => '更多' })
+        }),
         h(NPopconfirm, {
           onPositiveClick: () => handleDelete(row.id),
           positiveText: '删除',

@@ -193,6 +193,7 @@
 import { ref, reactive, h, computed, onMounted } from 'vue'
 import {
   NButton,
+  NDropdown,
   useMessage,
   useLoadingBar,
   type FormInst,
@@ -588,93 +589,46 @@ const baseColumns: DataTableColumns<VideoItem> = [
   {
     title: '操作',
     key: 'actions',
+    width: 160,
     render(row) {
-      const buttons = []
-      
-      // 如果状态是失败，显示重试按钮
-      if (row.status === 'failed') {
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              type: 'warning',
-              style: { marginRight: '8px' },
-              onClick: () => handleRetry(row.id)
-            },
-            { default: () => '重试' }
-          )
+      const canEdit = !row.status || row.status === 'done' || row.status === 'pending'
+      const isFailed = row.status === 'failed'
+
+      const moreOptions = []
+      if (isFailed) {
+        moreOptions.push({ label: '重试', key: 'retry' })
+      }
+      if (canEdit) {
+        moreOptions.push(
+          { label: '位置信息', key: 'location' },
+          { label: '评论', key: 'comment' }
         )
       }
-      
-      // 只有完成状态才能编辑
-      if (!row.status || row.status === 'done'|| row.status === 'pending') {
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => openEditModal(row)
-            },
-            { default: () => '编辑' }
-          )
-        )
 
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => openLocationModal(row)
-            },
-            { default: () => '位置信息' }
-          )
-        )
-
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => router.push({
-                path: '/manager/comment',
-                query: { targetType: 'video', targetId: row.uuid }
-              })
-            },
-            { default: () => '评论' }
-          )
-        )
+      const handleMoreSelect = (key: string) => {
+        if (key === 'retry') handleRetry(row.id)
+        else if (key === 'location') openLocationModal(row)
+        else if (key === 'comment') router.push({ path: '/manager/comment', query: { targetType: 'video', targetId: row.uuid } })
       }
-      
-      // 删除按钮
-      buttons.push(
+
+      return h('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
+        canEdit
+          ? h(NButton, { size: 'small', onClick: () => openEditModal(row) }, { default: () => '编辑' })
+          : null,
+        moreOptions.length > 0
+          ? h(NDropdown, { trigger: 'click', options: moreOptions, onSelect: handleMoreSelect }, {
+              default: () => h(NButton, { size: 'small' }, { default: () => '更多' })
+            })
+          : null,
         h(
           NPopconfirm,
-          {
-            onPositiveClick: () => handleDelete(row.id),
-            positiveText: '删除',
-            negativeText: '取消',
-            showIcon: false
-          },
+          { onPositiveClick: () => handleDelete(row.id), positiveText: '删除', negativeText: '取消', showIcon: false },
           {
             default: () => '确认要删除吗？',
-            trigger: () =>
-              h(
-                NButton,
-                {
-                  size: 'small',
-                  type: 'error'
-                },
-                { default: () => '删除' }
-              )
+            trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' })
           }
         )
-      )
-      
-      return buttons
+      ])
     }
   }
 ]

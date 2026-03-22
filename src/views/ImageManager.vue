@@ -303,7 +303,7 @@
 import { onMounted, ref ,h, reactive, computed} from 'vue'
 import { fetchImages ,deleteImage, updateImage, fetchCollectionsWithImageId, addImagesToCollections, removeImagesFromCollections, fetchImagesWithCollectionId} from '../api/images'
 import type { DataTableColumns } from 'naive-ui'
-import { NButton ,NPopconfirm, useMessage, useDialog, NTag, NSpin, NFlex} from 'naive-ui'
+import { NButton, NDropdown, NPopconfirm, useMessage, useDialog, NTag, NSpin, NFlex} from 'naive-ui'
 import type { ImageItem, CollectionResponse } from '../api/images'
 import {GridOutline, CloseOutline, EllipsisVertical} from '@vicons/ionicons5'
 import {List20Filled, CollectionsAdd24Regular} from '@vicons/fluent'
@@ -447,106 +447,48 @@ const baseColumns: DataTableColumns<ImageItem> = [
   {
     title: '操作',
     key: 'actions',
-    width: 310,
+    width: 160,
     render(row) {
-      const buttons = []
-      
-      // 如果状态是失败，显示重试按钮
-      if (row.status === 'failed') {
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              type: 'warning',
-              style: { marginRight: '8px' },
-              onClick: () => handleRetry(row.id)
-            },
-            { default: () => '重试' }
-          )
+      const canEdit = !row.status || row.status === 'done' || row.status === 'pending'
+      const isFailed = row.status === 'failed'
+
+      const moreOptions = []
+      if (isFailed) {
+        moreOptions.push({ label: '重试', key: 'retry' })
+      }
+      if (canEdit) {
+        moreOptions.push(
+          { label: '位置信息', key: 'location' },
+          { label: 'EXIF信息', key: 'exif' },
+          { label: '评论', key: 'comment' }
         )
       }
-      
-      // 只有完成状态才能编辑/配置位置
-      if (!row.status || row.status === 'done'|| row.status === 'pending') {
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => handleEdit(row)
-            },
-            { default: () => '编辑' }
-          )
-        )
 
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => openImageLocationModal(row)
-            },
-            { default: () => '位置信息' }
-          )
-        )
-
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => openExifModal(row)
-            },
-            { default: () => 'EXIF信息' }
-          )
-        )
-
-        buttons.push(
-          h(
-            NButton,
-            {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: () => router.push({
-                path: '/manager/comment',
-                query: { targetType: 'image', targetId: row.uuid }
-              })
-            },
-            { default: () => '评论' }
-          )
-        )
+      const handleMoreSelect = (key: string) => {
+        if (key === 'retry') handleRetry(row.id)
+        else if (key === 'location') openImageLocationModal(row)
+        else if (key === 'exif') openExifModal(row)
+        else if (key === 'comment') router.push({ path: '/manager/comment', query: { targetType: 'image', targetId: row.uuid } })
       }
-      
-      // 删除按钮
-      buttons.push(
+
+      return h('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
+        canEdit
+          ? h(NButton, { size: 'small', onClick: () => handleEdit(row) }, { default: () => '编辑' })
+          : null,
+        moreOptions.length > 0
+          ? h(NDropdown, { trigger: 'click', options: moreOptions, onSelect: handleMoreSelect }, {
+              default: () => h(NButton, { size: 'small' }, { default: () => '更多' })
+            })
+          : null,
         h(
           NPopconfirm,
-          {
-            onPositiveClick: () => handleDelete(row.id),
-            positiveText: '删除',
-            negativeText: '取消',
-            showIcon: false
-          },
+          { onPositiveClick: () => handleDelete(row.id), positiveText: '删除', negativeText: '取消', showIcon: false },
           {
             default: () => '确认要删除吗？',
-            trigger: () =>
-              h(
-                NButton,
-                {
-                  size: 'small',
-                  type: 'primary'
-                },
-                { default: () => '删除' }
-              )
+            trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' })
           }
         )
-      )
-      
-      return buttons
+      ])
     }
   }
 ]
