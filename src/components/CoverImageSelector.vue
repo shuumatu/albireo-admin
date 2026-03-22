@@ -35,10 +35,10 @@
             >
               <n-flex vertical>
                 <n-flex justify="center">
-                  <n-image 
-                    :src="img.imageUrl" 
-                    width="100%" 
-                    height="150px" 
+                  <n-image
+                    :src="toMediumUrl(img.imageUrl)"
+                    width="100%"
+                    height="150px"
                     object-fit="cover"
                   />
                 </n-flex>
@@ -142,6 +142,10 @@ function clearFilter() {
   selectedCollectionId.value = null
   page.value = 1
   loadImages()
+}
+
+function toMediumUrl(url: string) {
+  return url.replace(/\/raw\/[^/]+$/, '/medium/medium.jpg')
 }
 
 function selectCover(img: ImageItem) {
