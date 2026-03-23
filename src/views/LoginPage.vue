@@ -33,13 +33,17 @@
             show-password-on="click"
             placeholder="请输入密码"
             size="large"
-            :input-props="{ autocomplete: 'current-password' }"
+            :input-props="{ autocomplete: 'off' }"
           >
             <template #prefix>
               <n-icon :component="LockIcon" />
             </template>
           </n-input>
         </n-form-item>
+
+        <div class="remember-row">
+          <n-checkbox v-model:checked="rememberMe">记住密码</n-checkbox>
+        </div>
 
         <n-button
           type="primary"
@@ -59,22 +63,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { darkTheme, useMessage, type FormInst, type FormRules } from 'naive-ui'
 import { PersonOutline as PersonIcon, LockClosedOutline as LockIcon } from '@vicons/ionicons5'
 import { adminLogin } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
+import { saveCredential, loadCredential, clearCredential } from '../utils/credentialCrypto'
 
 const router = useRouter()
 const message = useMessage()
 const authStore = useAuthStore()
 const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
+const rememberMe = ref(false)
 
 const formData = reactive({
   username: '',
   password: ''
+})
+
+onMounted(async () => {
+  const saved = await loadCredential()
+  if (saved) {
+    formData.username = saved.username
+    formData.password = saved.password
+    rememberMe.value = true
+  }
 })
 
 const rules: FormRules = {
@@ -97,6 +112,11 @@ async function handleLogin() {
   try {
     const { data } = await adminLogin(formData.username, formData.password)
     authStore.setLoginInfo(data)
+    if (rememberMe.value) {
+      await saveCredential(formData.username, formData.password)
+    } else {
+      clearCredential()
+    }
     message.success('登录成功')
     router.push('/')
   } catch (err: any) {
@@ -167,5 +187,9 @@ async function handleLogin() {
 
 :deep(.n-form-item-label) {
   color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.remember-row {
+  margin-bottom: 4px;
 }
 </style>
