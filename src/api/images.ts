@@ -3,6 +3,7 @@ export interface ImageParams {
   page: number;
   pageSize: number;
   uuid?: string;
+  type?: string;
 }
 
 export interface ImageItem {
@@ -59,7 +60,7 @@ export function removeImagesFromCollections(params: CollectionsParams) {
 export interface CollectionResponse
 { id: number, name:string }
 
-export function fetchCollectionsWithImageId(imageId: number):Promise<CollectionResponse[]>{
+export function fetchCollectionsWithImageId(imageId: number):Promise<{data: CollectionResponse[]}>{
   return request.get(`/collection/image/by-image`, { params: {imageId} });
 }
 

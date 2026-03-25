@@ -4,7 +4,20 @@
           <n-flex align="center">
             <h2>图片管理</h2>
           </n-flex>  
-          <n-flex justify="flex-end">
+          <n-flex justify="flex-end" align="center" :wrap="false">
+            <n-select
+              v-model:value="filterType"
+              clearable
+              placeholder="全部类型"
+              style="width: 140px;"
+              :options="[
+                { label: '照片', value: 'photo' },
+                { label: '封面', value: 'cover' },
+                { label: '其他', value: 'other' },
+              ]"
+              @update:value="() => { page = 1; fetchPageData() }"
+              @clear="() => { page = 1; fetchPageData() }"
+            />
             <n-tooltip trigger="hover">
               <template #trigger>
                 <n-button @click="toggleView">
@@ -194,7 +207,7 @@
           <n-select
             v-model:value="modal.type"
             :options="[
-              { label: '独立图', value: 'standalone' },
+              { label: '照片', value: 'photo' },
               { label: '封面', value: 'cover' },
               { label: '其他', value: 'other' }
             ]"
@@ -340,12 +353,15 @@ const toggleView = () => {
 const page = ref(1)
 const pageSize = ref(10)
 const itemCount = ref(0) // 总记录数
+const filterType = ref<string | null>('photo')
 async function fetchPageData() {
   let res
   if(collectionDetailStore.img){
     res=await fetchImagesWithCollectionId(imageManagerStore.collectionId,{ page: page.value, pageSize: pageSize.value })
   }else{
-    res = await fetchImages({ page: page.value, pageSize: pageSize.value })
+    const params: any = { page: page.value, pageSize: pageSize.value }
+    if (filterType.value) params.type = filterType.value
+    res = await fetchImages(params)
   }
   // @ts-ignore
   images.value = res.data
@@ -505,8 +521,9 @@ const originalCollectionIds = ref<number[]>([])
 
 async function handleEdit(row: ImageItem) {
   Object.assign(modal, { ...row })
-  modal.collections = await fetchCollectionsWithImageId(row.id)
-  modal.collectionIds = modal.collections ? modal.collections.map(c => c.id) : []
+  const collectionsRes = await fetchCollectionsWithImageId(row.id)
+  modal.collections = collectionsRes.data ?? []
+  modal.collectionIds = modal.collections.map(c => c.id)
   originalCollectionIds.value = [...modal.collectionIds]
 
   showModal.value = true
