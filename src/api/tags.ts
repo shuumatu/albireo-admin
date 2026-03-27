@@ -10,7 +10,7 @@ interface TagItem {
   usageCount?: number;
 }
 
-export function fetchTags(params?: { keyword?: string }): Promise<TagItem[]> {
+export function fetchTags(params?: { keyword?: string; page?: number; pageSize?: number }): Promise<TagItem[]> {
   return request.get('/tag/list', { params });
 }
 
