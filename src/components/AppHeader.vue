@@ -94,9 +94,19 @@ const menuOptions = [
         label: '系统配置',
         key: '/manager/system-config'
       },
+    ]
+  },
+  {
+    label: '工具',
+    key: '/tools',
+    children: [
       {
         label: '处理进度',
         key: '/manager/task-progress'
+      },
+      {
+        label: '模型切换',
+        key: '/manager/vision-model'
       }
     ]
   }

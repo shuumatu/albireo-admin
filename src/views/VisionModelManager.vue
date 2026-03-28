@@ -47,12 +47,14 @@ const message = useMessage()
 
 const modelLabels: Record<string, string> = {
   zhipu: '智谱 AI (glm-4.6v-flash)',
-  gemini: 'Google Gemini 3 Flash Preview'
+  gemini: 'Google Gemini 3 Flash Preview',
+  twelvelabs: 'Twelve Labs'
 }
 
 const modelOptions = [
   { label: '智谱 AI', value: 'zhipu' },
-  { label: 'Google Gemini', value: 'gemini' }
+  { label: 'Google Gemini', value: 'gemini' },
+  { label: 'Twelve Labs', value: 'twelvelabs' }
 ]
 
 const currentModel = ref<string | null>(null)
