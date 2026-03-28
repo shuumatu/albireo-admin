@@ -244,7 +244,7 @@ interface VideoItem {
   presignUrl: string
   videoUrl: string
   coverUrl: string | null
-  status?: 'uploading' | 'pending' | 'processing' | 'done' | 'failed' | null
+  status?: 'uploading' | 'pending' | 'processing' | 'transcoding' | 'ai_analyzing' | 'done' | 'failed' | null
   visibility: string | null
   createdAt: string
   updatedAt: string
@@ -492,6 +492,8 @@ function getStatusText(status: string): string {
     uploading: '上传中',
     pending: '待处理',
     processing: '处理中',
+    transcoding: '转码中',
+    ai_analyzing: 'AI分析中',
     failed: '上传失败'
   }
   return statusMap[status] || ''
@@ -560,6 +562,8 @@ const baseColumns: DataTableColumns<VideoItem> = [
         uploading: { type: 'info', text: '上传中', showSpin: true },
         pending: { type: 'default', text: '待处理', showSpin: false },
         processing: { type: 'warning', text: '处理中', showSpin: true },
+        transcoding: { type: 'warning', text: '转码中', showSpin: true },
+        ai_analyzing: { type: 'info', text: 'AI分析中', showSpin: true },
         failed: { type: 'error', text: '上传失败', showSpin: false }
       }
       

@@ -12,6 +12,8 @@ import CommentManager from '../views/CommentManager.vue'
 import ShareManager from '../views/ShareManager.vue'
 import LoginPage from '../views/LoginPage.vue'
 import UserProfile from '../views/UserProfile.vue'
+import TaskProgress from '../views/TaskProgress.vue'
+import VisionModelManager from '../views/VisionModelManager.vue'
 
 const routes = [
     {
@@ -76,6 +78,18 @@ const routes = [
         name: 'systemConfigManager',
         meta: { title: '系统配置管理' },
         component: SystemConfigManager
+    },
+    {
+        path: '/manager/task-progress',
+        name: 'taskProgress',
+        meta: { title: '处理进度' },
+        component: TaskProgress
+    },
+    {
+        path: '/manager/vision-model',
+        name: 'visionModelManager',
+        meta: { title: '视觉模型管理' },
+        component: VisionModelManager
     },
     {
         path: '/map',
