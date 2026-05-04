@@ -26,88 +26,105 @@ uploadRequest.interceptors.response.use(
   }
 );
 
-interface InitiateParams {
-  fileName: string;
-  fileType: string;
-  fileSize: number;
-  fileHash: string;
-  dateTime?: string | null;  // ISO 8601 格式的日期时间，如: "2021-04-30T17:07:24"
-  gpsData?: GpsData | null;  // 添加这一行
-  dateTimeSource?: 'exif' | 'file';
-}
 export interface GpsData {
   latitude: number;
   longitude: number;
   altitude: number | null;
 }
-interface InitiateResponse{
-  key:string;
-  uploadId:string;
-  partSize:number;
-  alreadyExists:boolean;
-  url:string;//去重命中时为访问url DirectUpload时为上传url
-  directUpload:boolean;
+
+interface InitiateParams {
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  fileHash: string;
+  dateTime?: string | null;          // ISO 8601 格式的日期时间
+  gpsData?: GpsData | null;
+  dateTimeSource?: 'exif' | 'file';
 }
 
-export function initiateUpload(params: InitiateParams):Promise<InitiateResponse>{
-  return uploadRequest.post("/multipart/initiate",params)
+interface InitiateResponse {
+  key: string;
+  uploadId: string;
+  partSize: number;
+  alreadyExists: boolean;
+  url: string;          // 去重命中时为访问 url；DirectUpload 时为上传 url
+  directUpload: boolean;
 }
 
+export function initiateUpload(params: InitiateParams): Promise<InitiateResponse> {
+  return uploadRequest.post("/multipart/initiate", params);
+}
 
 interface PartsParams {
   key: string;
   uploadId: string;
 }
 
-interface PartETagDTO{
-  partNumber:number;
-  eTag:string;
+export interface PartETagDTO {
+  partNumber: number;
+  eTag: string;
 }
 
-interface ListUploadedPartsResponse{
-  key:string;
-  uploadId:string;
-  parts:PartETagDTO[];
+interface ListUploadedPartsResponse {
+  key: string;
+  uploadId: string;
+  parts: PartETagDTO[];
 }
 
-export function getParts(params:PartsParams):Promise<ListUploadedPartsResponse>{
-  return uploadRequest.get("/multipart/list-parts",{params})
+export function getParts(params: PartsParams): Promise<ListUploadedPartsResponse> {
+  return uploadRequest.get("/multipart/list-parts", { params });
 }
 
-interface UrlRequestParams{
-  key:string;
-  uploadId:string;
-  partNumber:number;
+interface UrlRequestParams {
+  key: string;
+  uploadId: string;
+  partNumber: number;
 }
 
-interface PartUrlResponse{
-  url:string;
-  partNumber:number;
+interface PartUrlResponse {
+  url: string;
+  partNumber: number;
 }
 
-
-export function getUploadUrl(params:UrlRequestParams):Promise<PartUrlResponse>{
-  return uploadRequest.post("/multipart/part-url",params);
+export function getUploadUrl(params: UrlRequestParams): Promise<PartUrlResponse> {
+  return uploadRequest.post("/multipart/part-url", params);
 }
 
-interface CompleteUploadParams{
-  hash:string;
-  key:string;
-  uploadId:string;
-  fileType:string;
-  parts:PartETagDTO[];
+interface CompleteUploadParams {
+  hash: string;
+  key: string;
+  uploadId: string;
+  fileType: string;
+  parts: PartETagDTO[];
 }
 
-export function completeUpload(params:CompleteUploadParams):Promise<void>{
-  return uploadRequest.post("/multipart/complete",params)
+export function completeUpload(params: CompleteUploadParams): Promise<void> {
+  return uploadRequest.post("/multipart/complete", params);
 }
 
-
-export interface CompleteDirectUploadParams{
-  fileHash:string;
-  objectKey:string;
-  fileType:string;
+export interface CompleteDirectUploadParams {
+  fileHash: string;
+  objectKey: string;
+  fileType: string;
+  fileSize?: number; // 可选：服务端用 headObject 校验对象大小
 }
-export function completeDirectUpload(params:CompleteDirectUploadParams):Promise<void>{
-  return uploadRequest.post("/complete-direct-upload",params)
+
+export function completeDirectUpload(params: CompleteDirectUploadParams): Promise<void> {
+  return uploadRequest.post("/complete-direct-upload", params);
+}
+
+export type SessionStatus = 'none' | 'active' | 'completed';
+
+export interface SessionStatusResponse {
+  status: SessionStatus;
+  key?: string;
+  uploadId?: string;
+  partSize?: number;
+  totalSize?: number;
+  uploadedParts?: PartETagDTO[];
+}
+
+/** 按 fileHash 查询当前是否存在可恢复的会话 */
+export function getSessionByHash(fileHash: string): Promise<SessionStatusResponse> {
+  return uploadRequest.get('/multipart/session', { params: { fileHash } });
 }
