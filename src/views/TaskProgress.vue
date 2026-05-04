@@ -45,6 +45,15 @@
 
           <!-- 右侧：状态 + 进度 -->
           <n-flex align="center" :size="16" :wrap="false">
+            <n-button
+              v-if="task.status === 'ai_analyze_failed'"
+              size="tiny"
+              type="warning"
+              :loading="retryingHash === task.hash"
+              @click="handleRetry(task.hash)"
+            >
+              重试
+            </n-button>
             <n-flex vertical :size="4" align="flex-end">
               <n-tag :type="statusTagType(task.status)" size="small" round :bordered="false">
                 <template #icon>
@@ -57,7 +66,7 @@
                   v-for="(step, i) in getSteps(task)"
                   :key="i"
                   class="step-segment"
-                  :class="{ active: step.active, done: step.done }"
+                  :class="{ active: step.active && !step.failed, done: step.done, failed: step.failed }"
                 />
               </div>
             </n-flex>
@@ -71,7 +80,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMessage } from 'naive-ui'
-import { fetchProcessingTasks, type TaskProgressVO } from '../api/task'
+import { fetchProcessingTasks, retryAiAnalyze, type TaskProgressVO } from '../api/task'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -82,6 +91,7 @@ dayjs.locale('zh-cn')
 const message = useMessage()
 const tasks = ref<TaskProgressVO[]>([])
 const loading = ref(false)
+const retryingHash = ref<string | null>(null)
 const autoRefresh = ref(true)
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -90,10 +100,13 @@ const imageSteps = ['uploading', 'pending', 'processing', 'done']
 
 function getSteps(task: TaskProgressVO) {
   const steps = task.type === 'video' ? videoSteps : imageSteps
-  const currentIndex = steps.indexOf(task.status)
+  const isFailed = task.status === 'ai_analyze_failed'
+  const effectiveStatus = isFailed ? 'ai_analyzing' : task.status
+  const currentIndex = steps.indexOf(effectiveStatus)
   return steps.map((_, i) => ({
     active: i === currentIndex,
-    done: i < currentIndex
+    done: i < currentIndex,
+    failed: isFailed && i === currentIndex
   }))
 }
 
@@ -103,6 +116,7 @@ function statusLabel(status: string) {
     pending: '等待处理',
     transcoding: '转码中',
     ai_analyzing: 'AI 分析中',
+    ai_analyze_failed: 'AI 分析失败',
     processing: '处理中',
     done: '已完成',
     failed: '失败'
@@ -111,7 +125,7 @@ function statusLabel(status: string) {
 }
 
 function statusTagType(status: string) {
-  if (status === 'failed') return 'error'
+  if (status === 'failed' || status === 'ai_analyze_failed') return 'error'
   if (status === 'done') return 'success'
   if (status === 'pending') return 'default'
   return 'warning'
@@ -134,6 +148,19 @@ async function fetchTasks() {
     message.error('获取任务列表失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function handleRetry(hash: string) {
+  retryingHash.value = hash
+  try {
+    await retryAiAnalyze(hash)
+    message.success('已重新发送 AI 分析任务')
+    await fetchTasks()
+  } catch {
+    message.error('重试失败')
+  } finally {
+    retryingHash.value = null
   }
 }
 
@@ -227,6 +254,11 @@ onUnmounted(() => {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.step-segment.failed {
+  background: #d03050;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
@@ -257,7 +289,8 @@ onUnmounted(() => {
   background: #36ad6a;
 }
 
-.status-dot.failed {
+.status-dot.failed,
+.status-dot.ai_analyze_failed {
   background: #d03050;
 }
 </style>

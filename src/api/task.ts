@@ -15,3 +15,7 @@ export function fetchProcessingTasks(): Promise<TaskProgressVO[]> {
 export function fetchTaskStatus(hash: string): Promise<TaskProgressVO> {
   return request.get(`/task/status/${hash}`);
 }
+
+export function retryAiAnalyze(hash: string): Promise<void> {
+  return request.post("/video/retry-ai-analyze", null, { params: { hash } });
+}
