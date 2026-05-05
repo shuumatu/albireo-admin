@@ -316,7 +316,8 @@
 import { onMounted, ref ,h, reactive, computed} from 'vue'
 import { fetchImages ,deleteImage, updateImage, fetchCollectionsWithImageId, addImagesToCollections, removeImagesFromCollections, fetchImagesWithCollectionId} from '../api/images'
 import type { DataTableColumns } from 'naive-ui'
-import { NButton, NDropdown, NPopconfirm, useMessage, useDialog, NTag, NSpin, NFlex} from 'naive-ui'
+import { NButton, NDropdown, NPopconfirm, useMessage, useDialog} from 'naive-ui'
+import StatusTag from '../components/StatusTag.vue'
 import type { ImageItem, CollectionResponse } from '../api/images'
 import {GridOutline, CloseOutline, EllipsisVertical} from '@vicons/ionicons5'
 import {List20Filled, CollectionsAdd24Regular} from '@vicons/fluent'
@@ -427,37 +428,7 @@ const baseColumns: DataTableColumns<ImageItem> = [
     key: 'status',
     width: 150,
     render(row) {
-      if (!row.status || row.status === 'done') {
-        return h(
-          NTag,
-          { type: 'success', size: 'small' },
-          { default: () => '完成' }
-        )
-      }
-      
-      const statusConfig: Record<string, { type: any; text: string; showSpin: boolean }> = {
-        uploading: { type: 'info', text: '上传中', showSpin: true },
-        pending: { type: 'default', text: '待处理', showSpin: false },
-        processing: { type: 'warning', text: '处理中', showSpin: true },
-        failed: { type: 'error', text: '上传失败', showSpin: false }
-      }
-      
-      const config = statusConfig[row.status] || { type: 'default', text: row.status, showSpin: false }
-      
-      return h(
-        NFlex,
-        { align: 'center', size: 'small' },
-        {
-          default: () => [
-            config.showSpin ? h(NSpin, { size: 'small', style: { marginRight: '4px' } }) : null,
-            h(
-              NTag,
-              { type: config.type, size: 'small' },
-              { default: () => config.text }
-            )
-          ]
-        }
-      )
+      return h(StatusTag, { status: row.status })
     }
   },
   {
