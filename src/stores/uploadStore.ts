@@ -38,6 +38,11 @@ export interface UploadTask {
   finishedAt?: number
   retryCount: number
   isStale?: boolean         // 刷新页面后该任务的 File 已丢失
+  /**
+   * 持久化的小尺寸缩略图 dataURL（JPEG），用于刷新页面后 File 丢失时兜底显示。
+   * 仅在文件入队/恢复时生成一次，体积控制在 ~32KB 以内。
+   */
+  thumbnailDataUrl?: string
   gpsData?: GpsData | null
   dateTime?: string
   dateTimeSource?: 'exif' | 'file'

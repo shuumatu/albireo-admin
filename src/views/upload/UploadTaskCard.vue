@@ -1,17 +1,19 @@
 <template>
   <div class="upload-card" :class="cardStateClass">
-    <!-- 缩略图 -->
+    <!-- 缩略图：优先用本地 File 的 blob URL（实时、清晰）；
+         否则回退到 store 里持久化的 dataURL（刷新后兜底）；
+         都没有再显示扩展名占位 -->
     <div class="upload-card__thumb">
       <img
-        v-if="thumbUrl && isImage"
-        :src="thumbUrl"
+        v-if="thumbDisplay.kind === 'image'"
+        :src="thumbDisplay.src"
         :alt="task.fileName"
         class="upload-card__thumb-media"
         loading="lazy"
       />
       <video
-        v-else-if="thumbUrl && isVideo"
-        :src="thumbUrl"
+        v-else-if="thumbDisplay.kind === 'video'"
+        :src="thumbDisplay.src"
         class="upload-card__thumb-media"
         muted
         playsinline
@@ -208,19 +210,35 @@ const ext = computed(() => fileExtension(props.task.fileName))
 const isImage = computed(() => props.task.fileType.startsWith('image/'))
 const isVideo = computed(() => props.task.fileType.startsWith('video/'))
 
-const thumbUrl = ref<string | null>(null)
-function buildThumb() {
-  if (thumbUrl.value) {
-    URL.revokeObjectURL(thumbUrl.value)
-    thumbUrl.value = null
+const blobUrl = ref<string | null>(null)
+function buildBlobUrl() {
+  if (blobUrl.value) {
+    URL.revokeObjectURL(blobUrl.value)
+    blobUrl.value = null
   }
   if (props.file && (isImage.value || isVideo.value)) {
-    thumbUrl.value = URL.createObjectURL(props.file)
+    blobUrl.value = URL.createObjectURL(props.file)
   }
 }
-watch(() => props.file, buildThumb, { immediate: true })
+watch(() => props.file, buildBlobUrl, { immediate: true })
 onBeforeUnmount(() => {
-  if (thumbUrl.value) URL.revokeObjectURL(thumbUrl.value)
+  if (blobUrl.value) URL.revokeObjectURL(blobUrl.value)
+})
+
+/**
+ * 决定缩略图显示方式：
+ *  - 有 File：用 blob URL，按文件类型决定是 <img> 还是 <video>
+ *  - 否则：用持久化 dataURL（生成时已是 JPEG），统一以 <img> 渲染
+ */
+const thumbDisplay = computed<{ kind: 'image' | 'video' | null; src: string }>(() => {
+  if (blobUrl.value) {
+    if (isImage.value) return { kind: 'image', src: blobUrl.value }
+    if (isVideo.value) return { kind: 'video', src: blobUrl.value }
+  }
+  if (props.task.thumbnailDataUrl) {
+    return { kind: 'image', src: props.task.thumbnailDataUrl }
+  }
+  return { kind: null, src: '' }
 })
 
 const statusLabel = computed(() => {

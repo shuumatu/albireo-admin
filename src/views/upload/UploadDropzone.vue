@@ -54,6 +54,7 @@ import { CloudUploadOutline as CloudUploadIcon } from '@vicons/ionicons5'
 const props = defineProps<{
   accept?: string
 }>()
+void props.accept // 仅用于 IDE 提示，accept 由模板使用
 
 const emit = defineEmits<{
   (e: 'files', files: File[]): void
@@ -63,6 +64,7 @@ const inputRef = ref<HTMLInputElement | null>(null)
 const isDragOver = ref(false)
 const windowDragOver = ref(false)
 let dragCounter = 0
+let resetMaskTimer: number | null = null
 
 function openPicker() {
   inputRef.value?.click()
@@ -76,10 +78,38 @@ function onInputChange(e: Event) {
   input.value = ''
 }
 
+function isFileDrag(e: DragEvent): boolean {
+  // dataTransfer.types 是 DOMStringList，类型上 includes 不一定可用，转一下
+  const types = e.dataTransfer?.types
+  if (!types) return false
+  for (let i = 0; i < types.length; i++) {
+    if (types[i] === 'Files') return true
+  }
+  return false
+}
+
+function clearMask() {
+  dragCounter = 0
+  windowDragOver.value = false
+  if (resetMaskTimer != null) {
+    window.clearTimeout(resetMaskTimer)
+    resetMaskTimer = null
+  }
+}
+
+/** 兜底：超过 1.5 秒没有任何 dragover 心跳，强制清掉遮罩，避免计数器卡住 */
+function scheduleMaskReset() {
+  if (resetMaskTimer != null) window.clearTimeout(resetMaskTimer)
+  resetMaskTimer = window.setTimeout(() => {
+    if (windowDragOver.value) clearMask()
+  }, 1500)
+}
+
 function onDragEnter() {
   isDragOver.value = true
 }
-function onDragOver() {
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
   isDragOver.value = true
 }
 function onDragLeave() {
@@ -88,43 +118,79 @@ function onDragLeave() {
 
 function onDrop(e: DragEvent) {
   isDragOver.value = false
-  windowDragOver.value = false
-  dragCounter = 0
+  clearMask()
   if (!e.dataTransfer) return
   const files = Array.from(e.dataTransfer.files || [])
   if (files.length) emit('files', files)
 }
 
-// 全局窗口拖拽遮罩
+// ============== 全局窗口级拖拽 ==============
+// 关键：必须在 window 上 preventDefault dragover/drop，否则：
+//   1) 浏览器默认 dragover 不接受 drop，遮罩内非 dropzone 区域 drop 无效
+//   2) 落到 body 上的 drop 会被浏览器当作"导航到该文件"，整个 SPA 会被替换
+
 function onWindowDragEnter(e: DragEvent) {
-  if (e.dataTransfer?.types?.includes('Files')) {
-    dragCounter++
-    windowDragOver.value = true
-  }
+  if (!isFileDrag(e)) return
+  dragCounter++
+  windowDragOver.value = true
+  scheduleMaskReset()
 }
-function onWindowDragLeave() {
+
+function onWindowDragOver(e: DragEvent) {
+  if (!isFileDrag(e)) return
+  e.preventDefault()
+  // 心跳：刷新遮罩兜底定时器
+  if (windowDragOver.value) scheduleMaskReset()
+}
+
+function onWindowDragLeave(e: DragEvent) {
+  if (!isFileDrag(e)) return
   dragCounter = Math.max(0, dragCounter - 1)
-  if (dragCounter === 0) windowDragOver.value = false
+  if (dragCounter === 0) clearMask()
 }
-function onWindowDrop() {
-  dragCounter = 0
-  windowDragOver.value = false
+
+function onWindowDrop(e: DragEvent) {
+  if (!isFileDrag(e)) {
+    clearMask()
+    return
+  }
+  // 兜底：避免浏览器把文件当导航处理
+  e.preventDefault()
+  clearMask()
+  // 全屏遮罩承诺"任何位置 drop 都生效"，所以 window 级 drop 也接受文件
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length) emit('files', files)
+}
+
+function onWindowDragEnd() {
+  // 用户按 Esc 取消时，浏览器只触发 dragend，不会触发 drop / dragleave
+  clearMask()
+}
+
+function onWindowBlur() {
+  // tab 切走时也清遮罩
+  clearMask()
 }
 
 onMounted(() => {
   window.addEventListener('dragenter', onWindowDragEnter)
+  window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('dragleave', onWindowDragLeave)
   window.addEventListener('drop', onWindowDrop)
+  window.addEventListener('dragend', onWindowDragEnd)
+  window.addEventListener('blur', onWindowBlur)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('dragenter', onWindowDragEnter)
+  window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('dragleave', onWindowDragLeave)
   window.removeEventListener('drop', onWindowDrop)
+  window.removeEventListener('dragend', onWindowDragEnd)
+  window.removeEventListener('blur', onWindowBlur)
+  if (resetMaskTimer != null) window.clearTimeout(resetMaskTimer)
 })
 
 defineExpose({ openPicker })
-const _accept = props.accept
-void _accept
 </script>
 
 <style scoped>

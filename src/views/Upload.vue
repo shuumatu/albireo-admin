@@ -105,15 +105,41 @@ async function onPickFiles(files: File[]) {
     )
   }
 
-  // 记录每个文件的 ID（按 name+size 匹配）
-  const beforeIds = new Set(store.tasks.map((t) => t.id))
-  await queue.enqueueFiles(files)
-  for (const t of store.tasks) {
-    if (beforeIds.has(t.id)) continue
+  const result = queue.enqueueFiles(files)
+
+  // 把 File 对象绑定到对应 task（缩略图 / 续传需要）
+  for (const id of result.addedIds) {
+    const task = store.tasks.find((t) => t.id === id)
+    if (!task) continue
     const matched = files.find(
-      (f) => f.name === t.fileName && f.size === t.fileSize,
+      (f) => f.name === task.fileName && f.size === task.fileSize,
     )
-    if (matched) fileMap.value.set(t.id, matched)
+    if (matched) fileMap.value.set(id, matched)
+  }
+
+  // 用户体验：被去重静默跳过时显式提示，避免「拖了没反应」的错觉
+  if (result.skippedDuplicate.length > 0) {
+    const reasonText = (r: 'queued' | 'completed' | 'paused' | 'uploading') => {
+      switch (r) {
+        case 'completed': return '已上传'
+        case 'paused': return '已暂停'
+        case 'uploading': return '上传中'
+        default: return '已在队列'
+      }
+    }
+    if (result.skippedDuplicate.length === 1) {
+      const it = result.skippedDuplicate[0]
+      message.info(`已跳过「${it.fileName}」（${reasonText(it.reason)}）`)
+    } else {
+      message.info(`已跳过 ${result.skippedDuplicate.length} 个重复文件`)
+    }
+  }
+
+  if (result.addedIds.length > 0) {
+    message.success(`已加入 ${result.addedIds.length} 个文件到上传队列`)
+  } else if (result.skippedDuplicate.length === 0 && files.length > 0) {
+    // 既没添加也没跳过，理论上走不到，但以防万一
+    message.warning('未识别到可上传的文件')
   }
 }
 

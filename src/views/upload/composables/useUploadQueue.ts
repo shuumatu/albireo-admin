@@ -11,6 +11,7 @@ import {
   type GpsData,
 } from '../../../api/upload'
 import { useUploadStore, type UploadTask } from '../../../stores/uploadStore'
+import { generateThumbnail } from './thumbnailGenerator'
 
 interface Runtime {
   file: File
@@ -268,12 +269,53 @@ export function useUploadQueue() {
   onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
   onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 
-  /** 加入一组文件（去重 + 自动开跑） */
-  async function enqueueFiles(files: File[]) {
+  /**
+   * 后台异步生成缩略图并写回 store；不阻塞主流程，失败时静默忽略。
+   * 仅当任务还没有 thumbnailDataUrl，且文件类型是图片/视频时才会执行。
+   */
+  function ensureThumbnail(taskId: string, file: File, fileType: string): void {
+    const t = store.tasks.find((x) => x.id === taskId)
+    if (!t || t.thumbnailDataUrl) return
+    if (!fileType.startsWith('image/') && !fileType.startsWith('video/')) return
+    void generateThumbnail(file, fileType)
+      .then((dataUrl) => {
+        if (!dataUrl) return
+        const stillExists = store.tasks.find((x) => x.id === taskId)
+        if (!stillExists) return
+        store.updateTask(taskId, { thumbnailDataUrl: dataUrl })
+      })
+      .catch(() => {
+        /* 静默忽略：缩略图失败不影响上传 */
+      })
+  }
+
+  /**
+   * 加入一组文件（去重 + 自动开跑）
+   * @returns 入队统计，便于上层显示提示
+   */
+  function enqueueFiles(files: File[]): {
+    addedIds: string[]
+    skippedDuplicate: { fileName: string; reason: 'queued' | 'completed' | 'paused' | 'uploading' }[]
+  } {
+    const addedIds: string[] = []
+    const skippedDuplicate: { fileName: string; reason: 'queued' | 'completed' | 'paused' | 'uploading' }[] = []
+
     for (const file of files) {
       // 去重 1：本地 name+size 临时拦截（hash 阶段再做严格判断）
       const dup = store.findByNameSize(file.name, file.size)
-      if (dup && dup.status !== 'error' && !dup.isStale) continue
+      if (dup && dup.status !== 'error' && !dup.isStale) {
+        let reason: 'queued' | 'completed' | 'paused' | 'uploading' = 'queued'
+        if (dup.status === 'success') reason = 'completed'
+        else if (dup.status === 'paused' || dup.status === 'pausing') reason = 'paused'
+        else if (
+          dup.status === 'uploading' ||
+          dup.status === 'hashing' ||
+          dup.status === 'preparing'
+        )
+          reason = 'uploading'
+        skippedDuplicate.push({ fileName: file.name, reason })
+        continue
+      }
 
       const id = uid()
       const fileType = getFileMimeType(file)
@@ -302,9 +344,14 @@ export function useUploadQueue() {
         parts: [],
       })
       store.addTask(task)
+      addedIds.push(id)
+      // 后台生成持久化缩略图（用于刷新后兜底显示）
+      ensureThumbnail(id, file, fileType)
       // 不 await，串行启动会拖慢 UI
       void runTask(id)
     }
+
+    return { addedIds, skippedDuplicate }
   }
 
   function attachFile(taskId: string, file: File) {
@@ -317,9 +364,10 @@ export function useUploadQueue() {
       })
       return
     }
+    const fileType = task.fileType || getFileMimeType(file)
     runtimeMap.set(taskId, {
       file,
-      fileType: task.fileType || getFileMimeType(file),
+      fileType,
       paused: false,
       speedSamples: [],
       uploadedBytes: 0,
@@ -333,6 +381,7 @@ export function useUploadQueue() {
       errorMessage: undefined,
       retryCount: 0,
     })
+    ensureThumbnail(taskId, file, fileType)
     void runTask(taskId)
   }
 
@@ -753,9 +802,10 @@ export function useUploadQueue() {
         /* ignore */
       }
     }
+    const fileType = task.fileType || getFileMimeType(file)
     runtimeMap.set(taskId, {
       file,
-      fileType: task.fileType || getFileMimeType(file),
+      fileType,
       paused: false,
       speedSamples: [],
       uploadedBytes: 0,
@@ -767,6 +817,7 @@ export function useUploadQueue() {
       uploadId: canResume ? task.uploadId : undefined,
       partSize: canResume ? task.partSize : undefined,
     })
+    ensureThumbnail(taskId, file, fileType)
     store.updateTask(taskId, {
       status: 'queued',
       isStale: false,
