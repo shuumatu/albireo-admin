@@ -2,16 +2,23 @@ import request from "../utils/request";
 
 // 分页查询参数接口
 
-interface VideoListParams {
+export type VideoListOrderBy = 'createdAt' | 'updatedAt' | 'duration'
+export type VideoListOrder = 'asc' | 'desc'
+
+export interface VideoListParams {
   page?: number;
   pageSize?: number;
   collectionId: number|null|string;
-  // title?: string;
-  // description?: string;
-  // fileName?: string;
-  // status?: string;
-  // visibility?: string;
-  // [key: string]: any;
+  /** 标题 / 描述 / 文件名模糊匹配 */
+  keyword?: string;
+  /** 后端按 status 精确匹配 */
+  status?: string;
+  /** 后端按 visibility 精确匹配 */
+  visibility?: string;
+  /** 排序字段，默认 createdAt */
+  orderBy?: VideoListOrderBy;
+  /** 排序方向，默认 desc */
+  order?: VideoListOrder;
 }
 
 interface CollectionsManagerParams {
@@ -40,10 +47,38 @@ interface CollectionItem {
 
 
 
-// 后端返回数据接口
+/**
+ * 后端 VideoVO 在前端的镜像。后端 ffprobe 异步回写的字段（duration/宽高/文件大小）
+ * 老数据可能为 null，前端按字段缺失绕过显示，绝不阻塞列表 UI。
+ */
+export interface VideoItem {
+  id: number
+  uuid: string
+  title: string | null
+  description: string | null
+  location: string | null
+  shotAt: string | null
+  fileName: string
+  objectKey: string
+  presignUrl: string
+  videoUrl: string
+  coverUrl: string | null
+  status?: 'uploading' | 'pending' | 'processing' | 'transcoding' | 'ai_analyzing' | 'done' | 'failed' | 'ai_analyze_failed' | null
+  visibility: string | null
+  createdAt: string
+  updatedAt: string
+  collections: { id: number; name: string; description: string }[] | null
+  /** 视频时长（毫秒）。null 表示后端尚未抽到，前端不显示时长徽标。 */
+  durationMs?: number | null
+  width?: number | null
+  height?: number | null
+  /** 文件字节数。null = 未抽到。 */
+  fileSize?: number | null
+}
+
 export interface VideoListResponse {
   total: number;
-  data: any[];
+  data: VideoItem[];
 }
 
 interface CollectionResponse {
