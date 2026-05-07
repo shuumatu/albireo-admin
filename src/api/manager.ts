@@ -68,7 +68,7 @@ export interface VideoItem {
   presignUrl: string
   videoUrl: string
   coverUrl: string | null
-  status?: 'uploading' | 'pending' | 'processing' | 'transcoding' | 'ai_analyzing' | 'done' | 'failed' | 'ai_analyze_failed' | null
+  status?: 'uploading' | 'pending' | 'processing' | 'transcoding' | 'ai_analyzing' | 'done' | 'failed' | 'process_failed' | 'transcode_failed' | 'ai_analyze_failed' | null
   visibility: string | null
   createdAt: string
   updatedAt: string

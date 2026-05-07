@@ -102,9 +102,14 @@ export function visibilityTagType(v: string | null | undefined): NaiveTagType {
 
 /**
  * 从某些状态推导出"需要用户处理"——卡片要红框 + 顶部 alert 都用这个。
+ * transcode_failed 是 worker 重试耗尽后写入的终态。
  */
 export function needsAttention(status: string | null | undefined): boolean {
-  return status === 'failed' || status === 'ai_analyze_failed'
+  return (
+    status === 'failed' ||
+    status === 'ai_analyze_failed' ||
+    status === 'transcode_failed'
+  )
 }
 
 /**

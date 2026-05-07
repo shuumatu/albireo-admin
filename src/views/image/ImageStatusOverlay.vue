@@ -33,6 +33,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending: '待处理',
   processing: '处理中',
   failed: '上传失败',
+  process_failed: '处理失败',
 }
 
 const statusText = computed(() => STATUS_LABELS[props.status] ?? props.status)
@@ -41,7 +42,7 @@ const isProcessing = computed(() =>
   ['uploading', 'processing', 'pending'].includes(props.status)
 )
 
-const canRetry = computed(() => props.status === 'failed')
+const canRetry = computed(() => props.status === 'failed' || props.status === 'process_failed')
 </script>
 
 <style scoped>
@@ -69,6 +70,7 @@ const canRetry = computed(() => props.status === 'failed')
 .status-pending        { --overlay-tone: #595959; }
 .status-processing     { --overlay-tone: #d46b08; }
 .status-failed         { --overlay-tone: #cf1322; }
+.status-process_failed { --overlay-tone: #cf1322; }
 
 .status-text {
   color: #fff;

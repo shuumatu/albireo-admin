@@ -50,6 +50,7 @@ const STATUS_LABELS: Record<string, string> = {
   ai_analyzing: 'AI 分析中',
   failed: '上传失败',
   ai_analyze_failed: 'AI 分析失败',
+  transcode_failed: '转码失败',
 }
 
 const statusText = computed(() => STATUS_LABELS[props.status] ?? props.status)
@@ -68,7 +69,11 @@ const hasProgress = computed(
   () => typeof props.progress === 'number' && Number.isFinite(props.progress) && props.progress >= 0
 )
 
-const canRetry = computed(() => props.status === 'failed' || props.status === 'ai_analyze_failed')
+const canRetry = computed(() =>
+  props.status === 'failed' ||
+  props.status === 'ai_analyze_failed' ||
+  props.status === 'transcode_failed'
+)
 </script>
 
 <style scoped>
@@ -127,6 +132,7 @@ const canRetry = computed(() => props.status === 'failed' || props.status === 'a
 .status-ai_analyzing   { --overlay-tone: #1d7eb8; }
 .status-failed         { --overlay-tone: #cf1322; }
 .status-ai_analyze_failed { --overlay-tone: #cf1322; }
+.status-transcode_failed  { --overlay-tone: #cf1322; }
 
 .status-text {
   color: #fff;

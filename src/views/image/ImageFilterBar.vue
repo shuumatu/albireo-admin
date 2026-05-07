@@ -213,7 +213,8 @@ const statusOptions = [
   { label: '上传中', value: 'uploading' },
   { label: '待处理', value: 'pending' },
   { label: '处理中', value: 'processing' },
-  { label: '处理失败', value: 'failed' },
+  { label: '上传失败', value: 'failed' },
+  { label: '处理失败', value: 'process_failed' },
 ]
 
 const locationOptions = [

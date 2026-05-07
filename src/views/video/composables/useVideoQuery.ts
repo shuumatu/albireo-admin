@@ -242,6 +242,7 @@ function statusLabel(s: string): string {
     done: '已完成',
     failed: '失败',
     ai_analyze_failed: 'AI 分析失败',
+    transcode_failed: '转码失败',
   }
   return map[s] ?? s
 }

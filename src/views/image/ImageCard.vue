@@ -191,7 +191,7 @@ const menuOptions = computed(() => {
     opts.push({ label: 'EXIF 信息', key: 'exif' })
     opts.push({ label: '评论', key: 'comment' })
   }
-  if (s === 'failed') {
+  if (s === 'failed' || s === 'process_failed') {
     opts.push({ label: '重试', key: 'retry' })
   }
   if (opts.length > 0) opts.push({ type: 'divider', key: 'd1' })

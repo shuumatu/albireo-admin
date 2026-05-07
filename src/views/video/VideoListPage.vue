@@ -274,7 +274,12 @@ function getProgress(v: VideoItem): number | null {
 
 // ---------- 派生状态 ----------
 const failedCount = computed(() =>
-  videoList.value.filter((v) => v.status === 'failed' || v.status === 'ai_analyze_failed').length
+  videoList.value.filter(
+    (v) =>
+      v.status === 'failed' ||
+      v.status === 'ai_analyze_failed' ||
+      v.status === 'transcode_failed',
+  ).length
 )
 const dismissedFailedAlert = ref(false)
 function filterFailedOnly() {

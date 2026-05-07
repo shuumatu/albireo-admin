@@ -22,6 +22,12 @@ export interface UploadTask {
   id: string
   fileName: string
   fileSize: number
+  /**
+   * 文件 lastModified 毫秒时间戳，仅作为「弱去重」第三因子使用：
+   * 同名同大小但内容不同的文件（用户改动后另存为同名）很可能 lastModified 不同，
+   * 用它兜底可以避免误把第二份内容静默跳过；最终去重仍以 hash 为准。
+   */
+  lastModified?: number
   fileType: string
   fileHash?: string
   uploadId?: string
@@ -164,20 +170,46 @@ export const useUploadStore = defineStore(
       return tasks.value.find((t) => t.fileHash === hash)
     }
 
-    function findByNameSize(fileName: string, fileSize: number): UploadTask | undefined {
-      return tasks.value.find(
-        (t) => t.fileName === fileName && t.fileSize === fileSize,
-      )
+    /**
+     * 弱去重：name + size [+ lastModified]。
+     * 如果传了 lastModified 且 store 中目标任务也带 lastModified，则三者都需相等才算重复，
+     * 防止「同名同大小但内容已改」的文件被误跳过；权威去重仍由后续 hash 阶段完成。
+     */
+    function findByNameSize(
+      fileName: string,
+      fileSize: number,
+      lastModified?: number,
+    ): UploadTask | undefined {
+      return tasks.value.find((t) => {
+        if (t.fileName !== fileName || t.fileSize !== fileSize) return false
+        if (lastModified == null || t.lastModified == null) return true
+        return t.lastModified === lastModified
+      })
     }
 
     function hasRunningTasks(): boolean {
       return tasks.value.some((t) => RUNNING_STATUSES.includes(t.status))
     }
 
-    /** 页面刷新或路由切回后，把进行中的任务标记为需要重新选择文件 */
+    /**
+     * 页面刷新或路由切回后，把所有非终态、且需要 File 引用才能继续的任务标记为 need-resume。
+     *
+     * 范围：running（uploading / hashing / preparing / pausing）+ queued + paused。
+     * 之所以也要包含 queued / paused：刷新后模块级 runtimeMap 为空，这些任务即便状态文字
+     * 仍是「排队中 / 已暂停」，但点「继续」会因为 rt 缺失而 no-op，造成「按钮没反应」的僵死。
+     * success / error / need-resume 保持不变。
+     */
     function markRunningAsStale() {
+      const STALE_TARGETS: UploadStatus[] = [
+        'uploading',
+        'hashing',
+        'preparing',
+        'pausing',
+        'queued',
+        'paused',
+      ]
       for (const t of tasks.value) {
-        if (RUNNING_STATUSES.includes(t.status)) {
+        if (STALE_TARGETS.includes(t.status)) {
           t.status = 'need-resume'
           t.isStale = true
           t.speed = 0

@@ -7,6 +7,7 @@ import {
   completeUpload,
   completeDirectUpload,
   getSessionByHash,
+  cancelUpload,
   type PartETagDTO,
   type GpsData,
 } from '../../../api/upload'
@@ -18,6 +19,8 @@ interface Runtime {
   fileType: string
   abortController?: AbortController
   paused: boolean
+  /** 已被用户取消：runTask 在所有 await 边界检查后必须 early-return，避免误发 complete。 */
+  cancelled: boolean
   /** 滑动窗口速度采样（最多保留 5 秒） */
   speedSamples: { ts: number; bytes: number }[]
   /** 已上传字节计数（运行时） */
@@ -28,6 +31,8 @@ interface Runtime {
   uploadedParts: PartETagDTO[]
   /** 全部分片切分 */
   parts: { partNumber: number; start: number; end: number }[]
+  /** 各分片当前已发送字节（XHR upload 聚合用，整块完成后会清零该 key） */
+  partUploadLoaded: Map<number, number>
   /** 上传上下文 */
   key?: string
   uploadId?: string
@@ -243,6 +248,53 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+/**
+ * 预签名 PUT：用 XHR 以拿到 upload progress（fetch 无法实现字节级上传进度）。
+ */
+function putBlobWithProgress(
+  url: string,
+  body: Blob,
+  opts: {
+    contentType?: string
+    signal?: AbortSignal
+    onUploadProgress?: (loaded: number, total: number) => void
+  } = {},
+): Promise<{ ok: boolean; status: number; etag: string }> {
+  const nominalTotal = typeof body.size === 'number' && body.size > 0 ? body.size : 0
+  return new Promise((resolve, reject) => {
+    if (opts.signal?.aborted) {
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+      return
+    }
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', url)
+    if (opts.contentType) xhr.setRequestHeader('Content-Type', opts.contentType)
+    xhr.upload.onprogress = (ev) => {
+      if (!opts.onUploadProgress) return
+      const total =
+        ev.lengthComputable && ev.total > 0 ? ev.total : nominalTotal || ev.total || 1
+      opts.onUploadProgress(ev.loaded, Math.max(ev.loaded, total))
+    }
+    xhr.onload = () => {
+      const raw =
+        xhr.getResponseHeader('etag') ?? xhr.getResponseHeader('ETag') ?? ''
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        etag: raw.replaceAll('"', ''),
+      })
+    }
+    xhr.onerror = () => reject(new Error('上传网络错误'))
+    xhr.onabort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+    const onAbort = () => xhr.abort()
+    opts.signal?.addEventListener('abort', onAbort)
+    xhr.addEventListener('loadend', () => opts.signal?.removeEventListener('abort', onAbort), {
+      once: true,
+    })
+    xhr.send(body)
+  })
+}
+
 export function useUploadQueue() {
   const store = useUploadStore()
 
@@ -301,8 +353,9 @@ export function useUploadQueue() {
     const skippedDuplicate: { fileName: string; reason: 'queued' | 'completed' | 'paused' | 'uploading' }[] = []
 
     for (const file of files) {
-      // 去重 1：本地 name+size 临时拦截（hash 阶段再做严格判断）
-      const dup = store.findByNameSize(file.name, file.size)
+      // 去重 1：本地 name+size+lastModified 弱拦截，hash 阶段再做权威判断。
+      // 加上 lastModified 是为了避免「同名同大小但内容已改」的第二份文件被静默跳过。
+      const dup = store.findByNameSize(file.name, file.size, file.lastModified)
       if (dup && dup.status !== 'error' && !dup.isStale) {
         let reason: 'queued' | 'completed' | 'paused' | 'uploading' = 'queued'
         if (dup.status === 'success') reason = 'completed'
@@ -323,6 +376,7 @@ export function useUploadQueue() {
         id,
         fileName: file.name,
         fileSize: file.size,
+        lastModified: file.lastModified,
         fileType,
         status: 'queued',
         progress: 0,
@@ -337,11 +391,13 @@ export function useUploadQueue() {
         file,
         fileType,
         paused: false,
+        cancelled: false,
         speedSamples: [],
         uploadedBytes: 0,
         totalBytes: file.size,
         uploadedParts: [],
         parts: [],
+        partUploadLoaded: new Map(),
       })
       store.addTask(task)
       addedIds.push(id)
@@ -369,11 +425,13 @@ export function useUploadQueue() {
       file,
       fileType,
       paused: false,
+      cancelled: false,
       speedSamples: [],
       uploadedBytes: 0,
       totalBytes: file.size,
       uploadedParts: [],
       parts: [],
+      partUploadLoaded: new Map(),
     })
     store.updateTask(taskId, {
       status: 'queued',
@@ -438,14 +496,52 @@ export function useUploadQueue() {
     rt.uploadedBytes = 0
     rt.uploadedParts = []
     rt.parts = []
+    rt.partUploadLoaded = new Map()
     rt.key = undefined
     rt.uploadId = undefined
     void runTask(id)
   }
 
+  /**
+   * 移除任务：终态（success / error / need-resume / paused）直接移除；
+   * 仍在运行中（queued / hashing / preparing / uploading / pausing）则视为「取消」，
+   * 同步置 cancelled 标志、abort 飞行中的 XHR，并通知后端清理 MPU / 孤儿对象 / metadata 占位。
+   */
   function removeTask(id: string) {
+    const task = store.tasks.find((t) => t.id === id)
+    const rt = runtimeMap.get(id)
+
+    // 取一份后端清理所需的快照，避免 store / runtime 移除后丢失
+    const fileHash = rt?.fileHash ?? task?.fileHash
+    const objectKey = rt?.key ?? task?.objectKey
+    const uploadId = rt?.uploadId ?? task?.uploadId
+    const wasActive =
+      !!task &&
+      task.status !== 'success' &&
+      task.status !== 'error' &&
+      task.status !== 'need-resume'
+
+    if (rt) {
+      rt.cancelled = true
+      rt.paused = true
+      try {
+        rt.abortController?.abort()
+      } catch {
+        /* ignore */
+      }
+    }
+
     runtimeMap.delete(id)
     store.removeTask(id)
+
+    // 完成态不需要后端清理；秒传 / 直传成功后已写 digest，后端 cancel 也会跳过
+    const shouldNotifyBackend =
+      wasActive && !!(fileHash || (objectKey && uploadId))
+    if (shouldNotifyBackend) {
+      void cancelUpload({ fileHash, objectKey, uploadId }).catch(() => {
+        /* fire-and-forget：失败由后端定时清理兜底 */
+      })
+    }
   }
 
   function pauseAll() {
@@ -475,32 +571,64 @@ export function useUploadQueue() {
 
   // ============== 内部执行 ==============
 
-  function recordSpeed(id: string, deltaBytes: number) {
+  /**
+   * rt.uploadedBytes = 服务端已确认的已传字节（分片整块完成才累加）；
+   * partUploadLoaded = 尚在飞行中的各分片已发送字节。展示层两者相加。
+   */
+  function flushUploadTelemetry(
+    id: string,
+    deltaCommittedBytes: number,
+    multipartThrottle?: { last: number },
+  ) {
     const rt = runtimeMap.get(id)
-    if (!rt) return
+    if (!rt || rt.totalBytes <= 0) return
+
     const now = Date.now()
-    rt.uploadedBytes += deltaBytes
-    rt.speedSamples.push({ ts: now, bytes: deltaBytes })
-    // 修剪窗口为最近 5 秒
-    const cutoff = now - 5000
-    while (rt.speedSamples.length > 0 && rt.speedSamples[0].ts < cutoff) {
-      rt.speedSamples.shift()
+    if (deltaCommittedBytes !== 0) {
+      rt.uploadedBytes += deltaCommittedBytes
+      if (deltaCommittedBytes > 0) {
+        rt.speedSamples.push({ ts: now, bytes: deltaCommittedBytes })
+        const cutoff = now - 5000
+        while (rt.speedSamples.length > 0 && rt.speedSamples[0].ts < cutoff) {
+          rt.speedSamples.shift()
+        }
+      }
     }
+
+    const inFlightSum = [...rt.partUploadLoaded.values()].reduce((a, b) => a + b, 0)
+    const displayedUploaded = Math.min(rt.uploadedBytes + inFlightSum, rt.totalBytes)
+    const nearEnd = displayedUploaded >= rt.totalBytes - 2
+    if (
+      multipartThrottle &&
+      !nearEnd &&
+      now - multipartThrottle.last < 55
+    ) {
+      return
+    }
+    if (multipartThrottle) multipartThrottle.last = now
+
     const totalDelta = rt.speedSamples.reduce((a, b) => a + b.bytes, 0)
     const span =
       rt.speedSamples.length > 0
         ? Math.max((now - rt.speedSamples[0].ts) / 1000, 0.05)
         : 0.05
     const speed = totalDelta / span
-    const remaining = rt.totalBytes - rt.uploadedBytes
+    const remaining = rt.totalBytes - displayedUploaded
     const eta = speed > 0 ? remaining / speed : null
-    const progress = Math.min(99, Math.floor((rt.uploadedBytes / rt.totalBytes) * 100))
+    const progress = Math.min(
+      99,
+      Math.floor((displayedUploaded / rt.totalBytes) * 100),
+    )
     store.updateTask(id, {
-      uploadedBytes: rt.uploadedBytes,
+      uploadedBytes: displayedUploaded,
       speed,
       eta,
       progress,
     })
+  }
+
+  function recordSpeed(id: string, deltaBytes: number) {
+    flushUploadTelemetry(id, deltaBytes, undefined)
   }
 
   async function runTask(id: string) {
@@ -512,6 +640,7 @@ export function useUploadQueue() {
       // 1. 提取元数据
       store.updateTask(id, { status: 'preparing' })
       const meta = await extractMetadata(rt.file)
+      if (rt.cancelled) return
       store.updateTask(id, {
         gpsData: meta.gpsData,
         dateTime: meta.dateTime,
@@ -524,6 +653,7 @@ export function useUploadQueue() {
         const hash = await computeHashWithProgress(rt.file, (p) => {
           store.updateTask(id, { hashProgress: Math.floor(p * 100) })
         })
+        if (rt.cancelled) return
         rt.fileHash = hash
         store.updateTask(id, { fileHash: hash, hashProgress: 100 })
 
@@ -547,7 +677,7 @@ export function useUploadQueue() {
       }
 
       if (rt.paused) {
-        store.updateTask(id, { status: 'paused' })
+        if (!rt.cancelled) store.updateTask(id, { status: 'paused' })
         return
       }
 
@@ -562,6 +692,17 @@ export function useUploadQueue() {
         dateTimeSource: meta.dateTimeSource,
         gpsData: meta.gpsData,
       })
+      // initiate 成功后端已落 metadata uploading 占位 / 申请 MPU；若用户已取消，必须通知后端清理
+      if (rt.cancelled) {
+        void cancelUpload({
+          fileHash: rt.fileHash,
+          objectKey: init.key,
+          uploadId: init.uploadId,
+        }).catch(() => {
+          /* fire-and-forget：失败由后端定时任务兜底 */
+        })
+        return
+      }
 
       rt.key = init.key
       rt.uploadId = init.uploadId
@@ -633,13 +774,46 @@ export function useUploadQueue() {
     rt.abortController = new AbortController()
     await globalSemaphore.acquire()
     try {
-      const resp = await fetch(url, {
-        method: 'PUT',
-        body: rt.file,
+      const directThrottle = { last: 0 }
+      let markerLoaded = 0
+      const result = await putBlobWithProgress(url, rt.file, {
+        contentType: rt.fileType || undefined,
         signal: rt.abortController.signal,
+        onUploadProgress: (loaded) => {
+          const clamped = Math.min(loaded, rt.totalBytes)
+          const nearEnd = clamped >= rt.totalBytes - 2
+          const now = Date.now()
+          if (!nearEnd && now - directThrottle.last < 55) return
+          directThrottle.last = now
+          const delta = clamped - markerLoaded
+          markerLoaded = clamped
+          if (delta > 0) {
+            rt.speedSamples.push({ ts: now, bytes: delta })
+            const cutoff = now - 5000
+            while (rt.speedSamples.length > 0 && rt.speedSamples[0].ts < cutoff) {
+              rt.speedSamples.shift()
+            }
+          }
+          const totalDelta = rt.speedSamples.reduce((a, b) => a + b.bytes, 0)
+          const span =
+            rt.speedSamples.length > 0
+              ? Math.max((now - rt.speedSamples[0].ts) / 1000, 0.05)
+              : 0.05
+          const speed = totalDelta / span
+          const remaining = rt.totalBytes - clamped
+          const eta = speed > 0 ? remaining / speed : null
+          const progress = Math.min(99, Math.floor((clamped / rt.totalBytes) * 100))
+          store.updateTask(id, {
+            uploadedBytes: clamped,
+            speed,
+            eta,
+            progress,
+          })
+        },
       })
-      if (!resp.ok) throw new Error(`直传失败: ${resp.status}`)
-      // 简化：直传不切片，进度直接 100
+      if (!result.ok) throw new Error(`直传失败: ${result.status}`)
+      // PUT 已成功但用户取消：不写 digest，由 removeTask -> cancelUpload 删孤儿对象
+      if (rt.cancelled) return
       rt.uploadedBytes = rt.totalBytes
       store.updateTask(id, {
         progress: 100,
@@ -651,6 +825,7 @@ export function useUploadQueue() {
         fileType: rt.fileType,
         fileSize: rt.totalBytes,
       })
+      if (rt.cancelled) return
       store.updateTask(id, {
         status: 'success',
         progress: 100,
@@ -682,12 +857,13 @@ export function useUploadQueue() {
     // 已上传字节数
     const uploadedFromServer = listed.parts.length * rt.partSize
     rt.uploadedBytes = Math.min(uploadedFromServer, rt.totalBytes)
-    store.updateTask(id, {
-      uploadedBytes: rt.uploadedBytes,
-      progress: Math.min(99, Math.floor((rt.uploadedBytes / rt.totalBytes) * 100)),
-    })
+    rt.partUploadLoaded.clear()
+
+    flushUploadTelemetry(id, 0, undefined)
 
     rt.abortController = new AbortController()
+
+    const multipartProgressThrottle = { last: 0 }
 
     // 任务内并发上限 = min(2, 全局槽数)，每个 part-upload 仍走全局 semaphore
     const innerConcurrency = Math.min(2, store.concurrency)
@@ -701,7 +877,7 @@ export function useUploadQueue() {
         const part = rt.parts[idx]
         if (uploadedSet.has(part.partNumber)) continue
         try {
-          await uploadPartWithRetry(id, part, uploadedSet)
+          await uploadPartWithRetry(id, part, uploadedSet, multipartProgressThrottle)
         } catch (err) {
           uploadError = err
           break
@@ -713,6 +889,7 @@ export function useUploadQueue() {
     for (let i = 0; i < innerConcurrency; i++) workers.push(tryRun())
     await Promise.all(workers)
 
+    if (rt.cancelled) return
     if (rt.paused) {
       store.updateTask(id, { status: 'paused', speed: 0, eta: null })
       return
@@ -727,6 +904,7 @@ export function useUploadQueue() {
       fileType: rt.fileType,
       parts: rt.uploadedParts,
     })
+    if (rt.cancelled) return
     rt.uploadedBytes = rt.totalBytes
     store.updateTask(id, {
       status: 'success',
@@ -742,6 +920,7 @@ export function useUploadQueue() {
     id: string,
     part: { partNumber: number; start: number; end: number },
     uploadedSet: Set<number>,
+    multipartThrottle: { last: number },
   ) {
     const rt = runtimeMap.get(id)
     if (!rt) throw new Error('runtime missing')
@@ -757,15 +936,17 @@ export function useUploadQueue() {
             partNumber: part.partNumber,
           })
           const blob = rt.file.slice(part.start, part.end)
-          const resp = await fetch(url, {
-            method: 'PUT',
-            body: blob,
-            headers: rt.fileType ? { 'Content-Type': rt.fileType } : undefined,
+          const res = await putBlobWithProgress(url, blob, {
+            contentType: rt.fileType || undefined,
             signal: rt.abortController?.signal,
+            onUploadProgress: (loaded) => {
+              rt.partUploadLoaded.set(part.partNumber, loaded)
+              flushUploadTelemetry(id, 0, multipartThrottle)
+            },
           })
-          if (!resp.ok) throw new Error(`Part ${part.partNumber} 上传失败: ${resp.status}`)
-          const eTag = (resp.headers.get('etag') || '').replaceAll('"', '')
-          rt.uploadedParts.push({ partNumber: part.partNumber, eTag })
+          if (!res.ok) throw new Error(`Part ${part.partNumber} 上传失败: ${res.status}`)
+          rt.partUploadLoaded.delete(part.partNumber)
+          rt.uploadedParts.push({ partNumber: part.partNumber, eTag: res.etag })
           uploadedSet.add(part.partNumber)
           recordSpeed(id, blob.size)
           return
@@ -773,6 +954,7 @@ export function useUploadQueue() {
           globalSemaphore.release()
         }
       } catch (err: any) {
+        rt.partUploadLoaded.delete(part.partNumber)
         if (err?.name === 'AbortError') throw err
         attempt++
         if (attempt > FAILED_PART_RETRY) throw err
@@ -807,11 +989,13 @@ export function useUploadQueue() {
       file,
       fileType,
       paused: false,
+      cancelled: false,
       speedSamples: [],
       uploadedBytes: 0,
       totalBytes: file.size,
       uploadedParts: [],
       parts: [],
+      partUploadLoaded: new Map(),
       fileHash: task.fileHash,
       key: canResume ? task.objectKey : undefined,
       uploadId: canResume ? task.uploadId : undefined,

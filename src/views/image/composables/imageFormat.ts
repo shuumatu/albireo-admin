@@ -57,6 +57,7 @@ export function imageStatusLabel(s: string | null | undefined): string {
     processing: '处理中',
     done: '已完成',
     failed: '上传失败',
+    process_failed: '处理失败',
   }
   if (!s) return ''
   return map[s] ?? s
@@ -64,10 +65,10 @@ export function imageStatusLabel(s: string | null | undefined): string {
 
 /**
  * 处理失败的图片在卡片上需要红环 + 顶部 alert 提示。
- * 只把 'failed' 算"需要处理"——pending / processing 是正常进度状态，不算异常。
+ * pending / processing 是正常进度状态，不算异常；failed / process_failed 都视为终态失败。
  */
 export function imageNeedsAttention(status: string | null | undefined): boolean {
-  return status === 'failed'
+  return status === 'failed' || status === 'process_failed'
 }
 
 /**

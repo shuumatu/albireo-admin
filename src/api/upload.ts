@@ -128,3 +128,17 @@ export interface SessionStatusResponse {
 export function getSessionByHash(fileHash: string): Promise<SessionStatusResponse> {
   return uploadRequest.get('/multipart/session', { params: { fileHash } });
 }
+
+/**
+ * 取消上传：兼容分片 / 直传两种路径，幂等。
+ * 后端会同步 abort MPU、删除孤儿对象，并清理 metadata 中的 uploading 占位。
+ */
+export interface CancelUploadParams {
+  fileHash?: string;
+  objectKey?: string;
+  uploadId?: string;
+}
+
+export function cancelUpload(params: CancelUploadParams): Promise<void> {
+  return uploadRequest.post('/cancel-upload', params);
+}

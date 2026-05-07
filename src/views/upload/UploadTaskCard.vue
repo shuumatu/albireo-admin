@@ -161,7 +161,7 @@
             size="small"
             quaternary
             circle
-            aria-label="移除"
+            :aria-label="isActiveTask ? '取消' : '移除'"
             @click="$emit('remove', task.id)"
           >
             <template #icon>
@@ -169,7 +169,7 @@
             </template>
           </n-button>
         </template>
-        移除
+        {{ isActiveTask ? '取消' : '移除' }}
       </n-tooltip>
     </div>
   </div>
@@ -291,7 +291,20 @@ const canRetry = computed(() =>
   props.task.status === 'error' && !props.task.isStale,
 )
 const canRemove = computed(() =>
-  ['success', 'error', 'paused', 'need-resume'].includes(props.task.status),
+  [
+    'queued',
+    'hashing',
+    'preparing',
+    'uploading',
+    'pausing',
+    'paused',
+    'success',
+    'error',
+    'need-resume',
+  ].includes(props.task.status),
+)
+const isActiveTask = computed(() =>
+  ['queued', 'hashing', 'preparing', 'uploading', 'pausing'].includes(props.task.status),
 )
 
 async function copyKey() {

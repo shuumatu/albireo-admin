@@ -260,6 +260,7 @@ function statusLabel(s: string): string {
     processing: '处理中',
     done: '已完成',
     failed: '失败',
+    process_failed: '处理失败',
   }
   return map[s] ?? s
 }

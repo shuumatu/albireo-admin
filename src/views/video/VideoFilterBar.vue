@@ -205,7 +205,8 @@ const statusOptions = [
   { label: '处理中', value: 'processing' },
   { label: '转码中', value: 'transcoding' },
   { label: 'AI 分析中', value: 'ai_analyzing' },
-  { label: '处理失败', value: 'failed' },
+  { label: '上传失败', value: 'failed' },
+  { label: '转码失败', value: 'transcode_failed' },
   { label: 'AI 分析失败', value: 'ai_analyze_failed' },
 ]
 

@@ -159,7 +159,10 @@ onBeforeRouteLeave((_to, _from, next) => {
     content: '离开页面后任务会被暂停，回到该页可重新选择文件继续。是否离开？',
     positiveText: '离开',
     negativeText: '继续上传',
-    onPositiveClick: () => next(),
+    onPositiveClick: () => {
+      queue.pauseAll()
+      next()
+    },
     onNegativeClick: () => next(false),
     onClose: () => next(false),
   })

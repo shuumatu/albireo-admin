@@ -98,10 +98,25 @@ let timer: ReturnType<typeof setInterval> | null = null
 const videoSteps = ['uploading', 'pending', 'transcoding', 'ai_analyzing', 'done']
 const imageSteps = ['uploading', 'pending', 'processing', 'done']
 
+/**
+ * 把失败状态映射回它"卡住的那一步"，让步骤条把红色定位到对应分段：
+ *  - ai_analyze_failed → 卡在 ai_analyzing
+ *  - transcode_failed  → 卡在 transcoding
+ *  - process_failed    → 卡在 processing
+ *  - failed            → 通用失败，归在 uploading（第一段）
+ */
+const FAILED_STEP_MAP: Record<string, string> = {
+  ai_analyze_failed: 'ai_analyzing',
+  transcode_failed: 'transcoding',
+  process_failed: 'processing',
+  failed: 'uploading',
+}
+
 function getSteps(task: TaskProgressVO) {
   const steps = task.type === 'video' ? videoSteps : imageSteps
-  const isFailed = task.status === 'ai_analyze_failed'
-  const effectiveStatus = isFailed ? 'ai_analyzing' : task.status
+  const stuckAt = FAILED_STEP_MAP[task.status]
+  const isFailed = stuckAt !== undefined
+  const effectiveStatus = isFailed ? stuckAt : task.status
   const currentIndex = steps.indexOf(effectiveStatus)
   return steps.map((_, i) => ({
     active: i === currentIndex,
@@ -117,6 +132,8 @@ function statusLabel(status: string) {
     transcoding: '转码中',
     ai_analyzing: 'AI 分析中',
     ai_analyze_failed: 'AI 分析失败',
+    transcode_failed: '转码失败',
+    process_failed: '处理失败',
     processing: '处理中',
     done: '已完成',
     failed: '失败'
@@ -125,7 +142,14 @@ function statusLabel(status: string) {
 }
 
 function statusTagType(status: string) {
-  if (status === 'failed' || status === 'ai_analyze_failed') return 'error'
+  if (
+    status === 'failed' ||
+    status === 'ai_analyze_failed' ||
+    status === 'transcode_failed' ||
+    status === 'process_failed'
+  ) {
+    return 'error'
+  }
   if (status === 'done') return 'success'
   if (status === 'pending') return 'default'
   return 'warning'
@@ -290,7 +314,9 @@ onUnmounted(() => {
 }
 
 .status-dot.failed,
-.status-dot.ai_analyze_failed {
+.status-dot.ai_analyze_failed,
+.status-dot.transcode_failed,
+.status-dot.process_failed {
   background: #d03050;
 }
 </style>

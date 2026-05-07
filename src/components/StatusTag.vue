@@ -21,6 +21,9 @@ export type MediaStatus =
   | 'ai_analyzing'
   | 'done'
   | 'failed'
+  | 'process_failed'
+  | 'transcode_failed'
+  | 'ai_analyze_failed'
   | string
   | null
   | undefined
@@ -50,6 +53,9 @@ const STATUS_MAP: Record<string, StatusConfig> = {
   transcoding: { type: 'warning', text: '转码中', showSpin: true },
   ai_analyzing: { type: 'info', text: 'AI 分析中', showSpin: true },
   failed: { type: 'error', text: '失败', showSpin: false },
+  process_failed: { type: 'error', text: '处理失败', showSpin: false },
+  transcode_failed: { type: 'error', text: '转码失败', showSpin: false },
+  ai_analyze_failed: { type: 'error', text: 'AI 分析失败', showSpin: false },
 }
 
 const config = computed<StatusConfig>(() => {
