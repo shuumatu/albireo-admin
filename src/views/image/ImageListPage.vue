@@ -1,44 +1,40 @@
 <template>
   <!--
     根 div 把 naive-ui 公共 token 注入成 --n-* CSS 变量，
-    给所有非 naive 子节点（VideoCard 等自写 div）也能用主题色。
-    n-layout-content 默认只暴露 --n-color / --n-text-color，其它（如 --n-card-color
-    / --n-divider-color / --n-text-color-1/2/3）需要显式注入。
+    复用视频侧的 useVideoThemeVars——drawer / 浮动栏走 Teleport 时仍能拿到颜色变量。
   -->
-  <div class="video-list-page" :style="themeCssVars">
-    <!-- 粘性顶栏：标题 / 搜索 / 筛选 / 视图切换 / 设置 -->
-    <VideoFilterBar
+  <div class="image-list-page" :style="themeCssVars">
+    <!-- 粘性顶栏：标题 / 搜索 / 类型 / 状态 / 合集 / 排序 / 视图 / 设置 -->
+    <ImageFilterBar
       :state="filterBarState"
       :collections="allCollections"
       :active-chips="query.activeChips.value"
       @update-keyword="(v) => query.setFilter({ keyword: v })"
+      @update-type="(v) => query.setFilter({ type: v })"
       @update-status="(v) => query.setFilter({ status: v })"
-      @update-visibility="(v) => query.setFilter({ visibility: v })"
       @update-has-location="(v) => query.setFilter({ hasLocation: v })"
       @update-collection="(v) => query.setFilter({ collectionId: v })"
       @update-order="(orderBy, order) => query.setFilter({ orderBy, order })"
       @change-view="(mode) => query.setFilter({ viewMode: mode }, false)"
       @change-density="(d) => query.setFilter({ density: d }, false)"
-      @toggle-hover-preview="() => query.setFilter({ hoverPreview: !state.hoverPreview }, false)"
       @clear-chip="(key) => query.clearChip(key as any)"
       @clear-all-filters="() => query.clearAllFilters()"
     />
 
     <!-- "需处理"提醒条：扫一眼最强信号 -->
     <n-alert
-      v-if="failedCount > 0"
+      v-if="failedCount > 0 && !dismissedFailedAlert"
       type="error"
       :show-icon="true"
       closable
       class="needs-attention-alert"
       @close="dismissedFailedAlert = true"
-      v-show="!dismissedFailedAlert"
     >
       <template #header>
-        有 {{ failedCount }} 个视频处理失败，建议检查后重试。
+        有 {{ failedCount }} 张图片处理失败，建议检查后重试。
       </template>
       <n-button size="small" type="error" tertiary @click="filterFailedOnly">
-        查看失败视频
+        查看失败图片
       </n-button>
     </n-alert>
 
@@ -58,21 +54,18 @@
           >
             <div class="grid-wrap">
               <drag-select-option
-                v-for="video in videoList"
-                :key="video.id"
-                :value="video.id"
+                v-for="img in imageList"
+                :key="img.id"
+                :value="img.id"
                 class="grid-cell"
               >
-                <VideoCard
-                  :video="video"
-                  :selected="selection.isSelected(video.id)"
+                <ImageCard
+                  :image="img"
+                  :selected="selection.isSelected(img.id)"
                   :has-selection="selection.hasSelection.value"
-                  :progress="getProgress(video)"
-                  @click="onVideoClick"
-                  @dblclick="onVideoDblClick"
+                  @click="onImageClick"
+                  @dblclick="onImageDblClick"
                   @check="onCheckClick"
-                  @preview="onPreviewOpen"
-                  @preview-close="onPreviewClose"
                   @menu="onCardMenu"
                   @retry="onRetry"
                 />
@@ -95,15 +88,14 @@
                 : '点击选中后可批量操作' }}
             </span>
           </div>
-          <VideoListRow
-            v-for="video in videoList"
-            :key="video.id"
-            :video="video"
-            :selected="selection.isSelected(video.id)"
+          <ImageListRow
+            v-for="img in imageList"
+            :key="img.id"
+            :image="img"
+            :selected="selection.isSelected(img.id)"
             :has-selection="selection.hasSelection.value"
-            :progress="getProgress(video)"
-            @click="onVideoClick"
-            @dblclick="onVideoDblClick"
+            @click="onImageClick"
+            @dblclick="onImageDblClick"
             @check="(v, checked) => onListRowCheck(v, checked)"
             @menu="onCardMenu"
             @retry="onRetry"
@@ -111,9 +103,9 @@
         </div>
 
         <!-- 空状态 -->
-        <div v-if="!loading && videoList.length === 0" class="empty-wrap">
+        <div v-if="!loading && imageList.length === 0" class="empty-wrap">
           <n-empty
-            :description="hasAnyFilter ? '没有匹配的视频' : '还没有上传过视频'"
+            :description="hasAnyFilter ? '没有匹配的图片' : '还没有上传过图片'"
           >
             <template #extra>
               <n-button v-if="hasAnyFilter" @click="query.clearAllFilters()">
@@ -131,10 +123,10 @@
           show-icon
           style="margin-top: 16px;"
         >
-          <template #header>加载视频列表失败</template>
+          <template #header>加载图片列表失败</template>
           <n-flex align="center" :wrap="false">
             <span style="flex: 1 1 auto;">{{ loadError }}</span>
-            <n-button size="small" @click="loadVideoList">重试</n-button>
+            <n-button size="small" @click="loadImageList">重试</n-button>
           </n-flex>
         </n-alert>
       </n-spin>
@@ -153,45 +145,35 @@
     </div>
 
     <!-- 浮动操作栏 -->
-    <VideoFloatingActionBar
+    <ImageFloatingActionBar
       :selected-count="selection.selectedCount.value"
       :cross-page-count="selection.crossPageSelectedCount.value"
       :collections="allCollections"
+      :is-in-collection-view="isInCollectionView"
       @add-to-collections="onBatchAddToCollections"
-      @change-visibility="onBatchChangeVisibility"
-      @delete="onBatchDelete"
+      @change-type="onBatchChangeType"
+      @delete="onBatchDeleteOrRemove"
       @clear="selection.clearAll"
     />
 
     <!-- 编辑抽屉 -->
-    <VideoEditDrawer
+    <ImageEditDrawer
       v-model:show="drawerShow"
-      :video="drawerVideo"
+      :image="drawerImage"
       :collections="allCollections"
       :has-prev="drawerHasPrev"
       :has-next="drawerHasNext"
       @navigate="onDrawerNavigate"
-      @open-public="onDrawerOpenPublic"
       @delete="onDrawerDelete"
       @patched="onDrawerPatched"
       @collections-changed="onDrawerCollectionsChanged"
-    />
-
-    <!-- 悬停预览 popover -->
-    <VideoHoverPreview
-      v-if="state.hoverPreview"
-      :visible="hoverPreviewVisible"
-      :video="hoverPreviewVideo"
-      :anchor-rect="hoverPreviewRect"
-      @close="onPreviewClose"
-      @keep-alive="() => { /* 鼠标进入 popover 自身时保持显示 */ }"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NSpin,
   NEmpty,
@@ -201,105 +183,90 @@ import {
   NFlex,
   NCheckbox,
   useMessage,
+  useDialog,
 } from 'naive-ui'
-import { useVideoThemeVars } from './composables/useVideoThemeVars'
-import VideoFilterBar from './VideoFilterBar.vue'
-import VideoCard from './VideoCard.vue'
-import VideoListRow from './VideoListRow.vue'
-import VideoFloatingActionBar from './VideoFloatingActionBar.vue'
-import VideoEditDrawer from './VideoEditDrawer.vue'
-import VideoHoverPreview from './VideoHoverPreview.vue'
-import { useVideoQuery } from './composables/useVideoQuery'
-import { useVideoSelection } from './composables/useVideoSelection'
-import { getPublicSiteOrigin } from './composables/videoFormat'
+import { useVideoThemeVars } from '../video/composables/useVideoThemeVars'
+import ImageFilterBar from './ImageFilterBar.vue'
+import ImageCard from './ImageCard.vue'
+import ImageListRow from './ImageListRow.vue'
+import ImageFloatingActionBar from './ImageFloatingActionBar.vue'
+import ImageEditDrawer from './ImageEditDrawer.vue'
+import { useImageQuery } from './composables/useImageQuery'
+import { useImageSelection } from './composables/useImageSelection'
+// 公共站 origin 算法与视频侧共用，跨页面体验一致；图片详情路径是 /image/{uuid}
+import { getPublicSiteOrigin } from '../video/composables/videoFormat'
 import {
-  fetchVideoList,
-  fetchCollectionsIds,
-  addVideosToCollections,
-  removeVideosFromCollections,
-  deleteVideos,
-  updateVideo,
-} from '../../api/manager'
-import type { VideoItem } from '../../api/manager'
-import { fetchProcessingTasks } from '../../api/task'
-import { useCollectionStore } from '../../stores/collection'
+  fetchImages,
+  fetchImagesWithCollectionId,
+  deleteImage,
+  addImagesToCollections,
+  removeImagesFromCollections,
+  updateImage,
+} from '../../api/images'
+import type { ImageItem, ImageParams } from '../../api/images'
+import { fetchImageCollectionsIds } from '../../api/manager'
+import { useImageManagerStore } from '../../stores/imageManager'
+import { useCollectionDetailStore, useCollectionStore } from '../../stores/collection'
+import { imageNeedsAttention } from './composables/imageFormat'
 
 const message = useMessage()
+const dialog = useDialog()
 const router = useRouter()
+const route = useRoute()
 const collectionStore = useCollectionStore()
+const imageManagerStore = useImageManagerStore()
+const collectionDetailStore = useCollectionDetailStore()
 
-// 见 composables/useVideoThemeVars 注释。
 const themeCssVars = useVideoThemeVars()
 
-const query = useVideoQuery()
+const query = useImageQuery()
 const state = computed(() => query.state.value)
-const selection = useVideoSelection()
+const selection = useImageSelection()
+
+/**
+ * 嵌入在 CollectionDetail 内时——不走 URL 上的 collectionId，而是用 store 里上一步选中的 id。
+ * /manager/image 直链场景下 collectionDetailStore.img 已经被 onMounted 重置成 null。
+ */
+const isInCollectionView = computed(() => !!collectionDetailStore.img)
 
 // ---------- 数据 ----------
-const videoList = ref<VideoItem[]>([])
+const imageList = ref<ImageItem[]>([])
 const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const allCollections = ref<{ id: number; name: string }[]>([])
 
-// ---------- 任务进度（每 5s 拉一次）----------
-const progressByHash = ref<Record<string, { status: string; progress?: number | null }>>({})
-let progressTimer: number | null = null
-
-async function refreshProgress() {
-  try {
-    const list = await fetchProcessingTasks()
-    const map: Record<string, { status: string; progress?: number | null }> = {}
-    for (const t of list as any[]) {
-      if (!t?.hash) continue
-      map[t.hash] = { status: t.status, progress: t.progress }
-    }
-    progressByHash.value = map
-  } catch (_) { /* 忽略，定时器下个 tick 重试 */ }
-}
-
-/**
- * VideoItem 当前没暴露 hash（只暴露 uuid）。从 objectKey 抽 hash：
- * 上传约定 objectKey 含 hash（如 videos/{hash}/original/xxx）。
- */
-function extractHash(v: VideoItem): string | null {
-  const m = v.objectKey?.match(/videos\/([a-zA-Z0-9]+)\//)
-  return m ? m[1] : null
-}
-function getProgress(v: VideoItem): number | null {
-  const hash = extractHash(v)
-  if (!hash) return null
-  return progressByHash.value[hash]?.progress ?? null
-}
-
 // ---------- 派生状态 ----------
-const failedCount = computed(() =>
-  videoList.value.filter((v) => v.status === 'failed' || v.status === 'ai_analyze_failed').length
-)
+const failedCount = computed(() => imageList.value.filter((v) => imageNeedsAttention(v.status)).length)
 const dismissedFailedAlert = ref(false)
 function filterFailedOnly() {
   query.setFilter({ status: 'failed' })
   dismissedFailedAlert.value = false
 }
 
+/**
+ * "有筛选"判断：
+ *  - keyword / status / hasLocation / collectionId 任一非空算筛选；
+ *  - type 因为默认值是 'photo'（不是 null），仅当 type 不是默认值时才算筛选
+ *    （否则刚进页面就提示"清除筛选"反而困惑）。
+ */
 const hasAnyFilter = computed(
   () => !!state.value.keyword
+    || state.value.type !== 'photo'
     || !!state.value.status
-    || !!state.value.visibility
     || !!state.value.hasLocation
     || state.value.collectionId != null
 )
 
 const filterBarState = computed(() => ({
   keyword: state.value.keyword,
+  type: state.value.type,
   status: state.value.status,
-  visibility: state.value.visibility,
   hasLocation: state.value.hasLocation,
   orderBy: state.value.orderBy,
   order: state.value.order,
   viewMode: state.value.viewMode,
   density: state.value.density,
-  hoverPreview: state.value.hoverPreview,
   collectionId: state.value.collectionId,
 }))
 
@@ -310,17 +277,16 @@ const paginationPage = computed({
 
 // 选中：当前页全选状态
 const allCurrentSelected = computed(
-  () => videoList.value.length > 0 && videoList.value.every((v) => selection.isSelected(v.id))
+  () => imageList.value.length > 0 && imageList.value.every((v) => selection.isSelected(v.id))
 )
-const someCurrentSelected = computed(() => videoList.value.some((v) => selection.isSelected(v.id)))
+const someCurrentSelected = computed(() => imageList.value.some((v) => selection.isSelected(v.id)))
 
-// drag-select 适配：把 drag-select 的 v-model 同步到 selection store
+// drag-select 适配
 const dragSelectedIds = ref<number[]>([])
 function onDragSelectChange(_: number[]) {
   // change 事件先于 v-model 更新，留给 watch 处理
 }
 watch(dragSelectedIds, (ids) => {
-  // drag-select 在框选过程中持续更新 model；只有当用户真正完成（非空集）才一次性合并
   if (!ids || ids.length === 0) return
   const next = new Set(selection.selectedKeys.value)
   for (const id of ids) next.add(id)
@@ -329,30 +295,38 @@ watch(dragSelectedIds, (ids) => {
 })
 
 // ---------- 数据加载 ----------
-async function loadVideoList() {
+async function loadImageList() {
   loading.value = true
   loadError.value = ''
   try {
-    const params: any = {
+    const params: ImageParams = {
       page: state.value.page,
       pageSize: state.value.pageSize,
-      collectionId: state.value.collectionId ?? 0,
       keyword: state.value.keyword || undefined,
+      // type === null 表示"全部类型"，此时不传 type 即可让后端走全量分支
+      type: state.value.type ?? undefined,
       status: state.value.status || undefined,
-      visibility: state.value.visibility || undefined,
       hasLocation: state.value.hasLocation ?? undefined,
       orderBy: state.value.orderBy,
       order: state.value.order,
     }
-    const resp = (await fetchVideoList(params)) as unknown as { total: number; data: VideoItem[] }
-    videoList.value = resp.data ?? []
+
+    let resp: { total: number; data: ImageItem[] }
+    if (isInCollectionView.value && imageManagerStore.collectionId != null) {
+      resp = (await fetchImagesWithCollectionId(imageManagerStore.collectionId, params)) as unknown as { total: number; data: ImageItem[] }
+    } else if (state.value.collectionId != null) {
+      resp = (await fetchImagesWithCollectionId(state.value.collectionId, params)) as unknown as { total: number; data: ImageItem[] }
+    } else {
+      resp = (await fetchImages(params)) as unknown as { total: number; data: ImageItem[] }
+    }
+
+    imageList.value = resp.data ?? []
     total.value = resp.total ?? 0
-    selection.setCurrentPage(videoList.value)
-    // 同步 collection store（兼容侧边栏 / 其它页面）
+    selection.setCurrentPage(imageList.value)
     collectionStore.setCollection(state.value.collectionId)
   } catch (err: any) {
     loadError.value = err?.message ?? '未知错误'
-    videoList.value = []
+    imageList.value = []
     total.value = 0
   } finally {
     loading.value = false
@@ -361,7 +335,7 @@ async function loadVideoList() {
 
 async function loadCollections() {
   try {
-    const list = await fetchCollectionsIds()
+    const list = await fetchImageCollectionsIds()
     allCollections.value = (list as any[]).map((c) => ({ id: Number(c.id), name: c.name }))
   } catch (_) { /* 合集失败不阻塞主列表 */ }
 }
@@ -373,26 +347,24 @@ watch(
     state.value.pageSize,
     state.value.collectionId,
     state.value.keyword,
+    state.value.type,
     state.value.status,
-    state.value.visibility,
     state.value.hasLocation,
     state.value.orderBy,
     state.value.order,
   ],
-  () => loadVideoList(),
+  () => loadImageList(),
   { flush: 'post' }
 )
 
 // ---------- 卡片点击 / 选中 ----------
 /**
- * 单击 / 双击区分：
- *  - ctrl/meta/shift 点击是选择操作，立即处理（多选 / 范围选不能延迟）；
- *  - 普通单击 → 250 ms 后才打开抽屉；如果这段时间内来一个 dblclick，就取消，
- *    改为打开公共站详情页。
+ * 单击 / 双击区分（与 VideoListPage 同形态）：
+ *  - ctrl/meta/shift 立即处理（多选 / 范围选不能延迟）；
+ *  - 普通单击 → 250 ms 后才打开抽屉；这段时间内来一个 dblclick 就取消，
+ *    改为打开公共站 /image/{uuid}。
  *
- * 时机选择：浏览器多次点击间隔默认 ~500 ms 才发 dblclick，但实际多数用户的
- * 双击间隔 < 250 ms。250 ms 是常见的 UX 折中——既能稳定捕到双击，
- * 又不会让单击响应肉眼可感。
+ * 250 ms 是常见的 UX 折中：能稳定识别双击，又不会让单击响应肉眼可感。
  */
 let pendingClickTimer: number | null = null
 function clearPendingClick() {
@@ -401,9 +373,9 @@ function clearPendingClick() {
     pendingClickTimer = null
   }
 }
-function onVideoClick(video: VideoItem, ev: MouseEvent) {
+function onImageClick(image: ImageItem, ev: MouseEvent) {
   if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
-    selection.handleClick(video.id, {
+    selection.handleClick(image.id, {
       ctrlKey: ev.ctrlKey,
       metaKey: ev.metaKey,
       shiftKey: ev.shiftKey,
@@ -413,150 +385,144 @@ function onVideoClick(video: VideoItem, ev: MouseEvent) {
   clearPendingClick()
   pendingClickTimer = window.setTimeout(() => {
     pendingClickTimer = null
-    openDrawer(video)
+    openDrawer(image)
   }, 250)
 }
-function onVideoDblClick(video: VideoItem) {
+function onImageDblClick(image: ImageItem) {
   clearPendingClick()
-  openPublic(video)
+  openPublic(image)
 }
-function onCheckClick(video: VideoItem, _ev: MouseEvent) {
-  selection.toggle(video.id)
+
+function openPublic(image: ImageItem) {
+  const origin = getPublicSiteOrigin()
+  window.open(`${origin}/image/${image.uuid}`, '_blank')
 }
-function onListRowCheck(video: VideoItem, checked: boolean) {
-  if (checked && !selection.isSelected(video.id)) selection.toggle(video.id)
-  else if (!checked && selection.isSelected(video.id)) selection.toggle(video.id)
+function onCheckClick(image: ImageItem, _ev: MouseEvent) {
+  selection.toggle(image.id)
+}
+function onListRowCheck(image: ImageItem, checked: boolean) {
+  if (checked && !selection.isSelected(image.id)) selection.toggle(image.id)
+  else if (!checked && selection.isSelected(image.id)) selection.toggle(image.id)
 }
 function onToggleAllPage(checked: boolean) {
   if (checked) selection.selectAllCurrentPage()
   else {
-    const inPage = videoList.value.map((v) => v.id)
+    const inPage = imageList.value.map((v) => v.id)
     selection.removeFromSelection(inPage)
   }
 }
 
 // ---------- 卡片菜单 ----------
-function onCardMenu(video: VideoItem, action: string) {
+function onCardMenu(image: ImageItem, action: string) {
   switch (action) {
-    case 'edit': openDrawer(video); break
-    case 'open-public': openPublic(video); break
-    case 'set-cover':
-      openDrawer(video)
-      // TODO: 抽屉打开后定位到封面 tab
+    case 'edit': openDrawer(image); break
+    case 'open-public': openPublic(image); break
+    case 'location':
+      // 位置编辑统一进抽屉的 Tab，避免再开一个 modal
+      openDrawer(image)
       break
-    case 'copy-key':
-      copyKey(video)
+    case 'exif':
+      openDrawer(image)
+      break
+    case 'comment':
+      router.push({ path: '/manager/comment', query: { targetType: 'image', targetId: image.uuid } })
+      break
+    case 'retry':
+      onRetry(image)
       break
     case 'delete':
-      confirmDeleteOne(video)
+      confirmDeleteOne(image)
       break
   }
 }
 
-function openPublic(video: VideoItem) {
-  const origin = getPublicSiteOrigin()
-  window.open(`${origin}/video/${video.uuid}`, '_blank')
-}
-
-async function copyKey(video: VideoItem) {
-  try {
-    await navigator.clipboard.writeText(video.objectKey)
-    message.success('对象 Key 已复制')
-  } catch (_) {
-    message.warning('剪贴板不可用')
+async function confirmDeleteOne(image: ImageItem) {
+  if (isInCollectionView.value && imageManagerStore.collectionId != null) {
+    // 合集详情场景：单张操作改为"从合集移除"
+    dialog.warning({
+      title: '从合集移除',
+      content: `确定从当前合集中移除「${image.title || image.fileName}」？图片本身不会被删除。`,
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        try {
+          await removeImagesFromCollections({ imageIds: [image.id], collectionIds: [imageManagerStore.collectionId!] })
+          message.success('已从合集移除')
+          selection.removeFromSelection([image.id])
+          if (drawerImage.value?.id === image.id) drawerShow.value = false
+          await loadImageList()
+        } catch (err: any) {
+          message.error(`移除失败：${err?.message ?? '未知错误'}`)
+        }
+      },
+    })
+    return
   }
+  dialog.warning({
+    title: '确认删除',
+    content: `确定删除「${image.title || image.fileName}」？此操作不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await deleteImage([image.id])
+        message.success('已删除')
+        selection.removeFromSelection([image.id])
+        if (drawerImage.value?.id === image.id) drawerShow.value = false
+        await loadImageList()
+      } catch (err: any) {
+        message.error(`删除失败：${err?.message ?? '未知错误'}`)
+      }
+    },
+  })
 }
 
-async function confirmDeleteOne(video: VideoItem) {
-  if (!window.confirm(`确定删除「${video.title || video.fileName}」？此操作不可恢复。`)) return
-  try {
-    await deleteVideos([video.id])
-    message.success('已删除')
-    selection.removeFromSelection([video.id])
-    if (drawerVideo.value?.id === video.id) drawerShow.value = false
-    await loadVideoList()
-  } catch (err: any) {
-    message.error(`删除失败：${err?.message ?? '未知错误'}`)
-  }
-}
-
-async function onRetry(_video: VideoItem) {
-  // TODO: 调用 retry-ai-analyze 或其它重试入口（依赖具体失败状态）
+async function onRetry(_image: ImageItem) {
+  // TODO: 接入图片重试接口（当前后端尚无），刷新列表让用户感知到状态在拉
   message.info('重试已发送（待接入对应后端接口）')
+  await loadImageList()
 }
 
 // ---------- 抽屉编辑 ----------
 const drawerShow = ref(false)
-const drawerVideo = ref<VideoItem | null>(null)
+const drawerImage = ref<ImageItem | null>(null)
 const drawerIndex = computed(() =>
-  drawerVideo.value ? videoList.value.findIndex((v) => v.id === drawerVideo.value!.id) : -1
+  drawerImage.value ? imageList.value.findIndex((v) => v.id === drawerImage.value!.id) : -1
 )
 const drawerHasPrev = computed(() => drawerIndex.value > 0)
-const drawerHasNext = computed(() => drawerIndex.value >= 0 && drawerIndex.value < videoList.value.length - 1)
+const drawerHasNext = computed(() => drawerIndex.value >= 0 && drawerIndex.value < imageList.value.length - 1)
 
-function openDrawer(video: VideoItem) {
-  drawerVideo.value = video
+function openDrawer(image: ImageItem) {
+  drawerImage.value = image
   drawerShow.value = true
 }
 function onDrawerNavigate(delta: -1 | 1) {
   const idx = drawerIndex.value
   const next = idx + delta
-  if (next < 0 || next >= videoList.value.length) return
-  drawerVideo.value = videoList.value[next]
-}
-function onDrawerOpenPublic() {
-  if (drawerVideo.value) openPublic(drawerVideo.value)
+  if (next < 0 || next >= imageList.value.length) return
+  drawerImage.value = imageList.value[next]
 }
 function onDrawerDelete() {
-  if (drawerVideo.value) confirmDeleteOne(drawerVideo.value)
+  if (drawerImage.value) confirmDeleteOne(drawerImage.value)
 }
-function onDrawerPatched(videoId: number, patch: Partial<VideoItem>) {
-  // 列表本地 patch，避免抽屉里改了字段后必须刷整页
-  const idx = videoList.value.findIndex((v) => v.id === videoId)
+function onDrawerPatched(imageId: number, patch: Partial<ImageItem>) {
+  // 列表本地 patch，避免每次自动保存都全量刷新
+  const idx = imageList.value.findIndex((v) => v.id === imageId)
   if (idx >= 0) {
-    videoList.value[idx] = { ...videoList.value[idx], ...patch }
-    if (drawerVideo.value?.id === videoId) {
-      drawerVideo.value = { ...drawerVideo.value, ...patch } as VideoItem
+    imageList.value[idx] = { ...imageList.value[idx], ...patch }
+    if (drawerImage.value?.id === imageId) {
+      drawerImage.value = { ...drawerImage.value, ...patch } as ImageItem
     }
   }
 }
-async function onDrawerCollectionsChanged(videoId: number, collectionIds: number[]) {
-  if (!drawerVideo.value || drawerVideo.value.id !== videoId) return
-  const before = new Set((drawerVideo.value.collections ?? []).map((c) => c.id))
-  const after = new Set(collectionIds)
-  const toAdd = collectionIds.filter((id) => !before.has(id))
-  const toRemove = (drawerVideo.value.collections ?? []).filter((c) => !after.has(c.id)).map((c) => c.id)
-  try {
-    if (toAdd.length > 0) {
-      await addVideosToCollections({ videoIds: [videoId], collectionIds: toAdd })
-    }
-    if (toRemove.length > 0) {
-      await removeVideosFromCollections({ videoIds: [videoId], collectionIds: toRemove })
-    }
-    // 本地 patch collections 字段（取 allCollections 名称做近似）
-    const newCollections = collectionIds.map((id) => {
-      const c = allCollections.value.find((x) => x.id === id)
-      return { id, name: c?.name ?? `#${id}`, description: '' }
-    })
-    onDrawerPatched(videoId, { collections: newCollections })
-  } catch (err: any) {
-    message.error(`合集更新失败：${err?.message ?? '未知错误'}`)
-  }
-}
-
-// ---------- 悬停预览 ----------
-const hoverPreviewVisible = ref(false)
-const hoverPreviewVideo = ref<VideoItem | null>(null)
-const hoverPreviewRect = ref<DOMRect | null>(null)
-
-function onPreviewOpen(video: VideoItem, anchor: HTMLElement) {
-  if (!state.value.hoverPreview) return
-  hoverPreviewVideo.value = video
-  hoverPreviewRect.value = anchor.getBoundingClientRect()
-  hoverPreviewVisible.value = true
-}
-function onPreviewClose() {
-  hoverPreviewVisible.value = false
+async function onDrawerCollectionsChanged(imageId: number, collectionIds: number[]) {
+  if (!drawerImage.value || drawerImage.value.id !== imageId) return
+  // 抽屉内已经调过 add/remove 接口，这里只做本地 patch + 同步父组件状态
+  const newCollections = collectionIds.map((id) => {
+    const c = allCollections.value.find((x) => x.id === id)
+    return { id, name: c?.name ?? `#${id}`, description: '' }
+  })
+  onDrawerPatched(imageId, { collections: newCollections })
 }
 
 // ---------- 批量操作 ----------
@@ -565,45 +531,45 @@ async function onBatchAddToCollections(collectionIds: number[]) {
   const ids = selection.selectedArray.value
   if (ids.length === 0) return
   try {
-    await addVideosToCollections({ videoIds: ids, collectionIds })
+    await addImagesToCollections({ imageIds: ids, collectionIds })
     message.success(`已加入 ${collectionIds.length} 个合集`)
-    await loadVideoList()
+    await loadImageList()
   } catch (err: any) {
     message.error(`加合集失败：${err?.message ?? '未知错误'}`)
   }
 }
 
-async function onBatchChangeVisibility(visibility: string) {
+/**
+ * 批量改类型：图片有 photo / cover / other 三类。一次循环对每张图调 updateImage——
+ * 后端没有专门的"批量更新"接口，但 updateImage 是字段级 patch，每次只发 type，开销可控。
+ */
+async function onBatchChangeType(type: string) {
   const ids = selection.selectedArray.value
   if (ids.length === 0) return
   try {
-    await Promise.all(
-      ids.map((id) =>
-        updateVideo(id, {
-          title: '',
-          description: '',
-          shotAt: null,
-          visibility,
-        }).catch((e) => e)
-      )
-    )
-    message.success(`已批量设置可见性为 ${visibility}`)
-    await loadVideoList()
+    await Promise.all(ids.map((id) => updateImage(id, { type }).catch((e) => e)))
+    message.success(`已批量改类型为 ${type}`)
+    await loadImageList()
   } catch (err: any) {
-    message.error(`批量改可见性失败：${err?.message ?? '未知错误'}`)
+    message.error(`批量改类型失败：${err?.message ?? '未知错误'}`)
   }
 }
 
-async function onBatchDelete() {
+async function onBatchDeleteOrRemove() {
   const ids = selection.selectedArray.value
   if (ids.length === 0) return
   try {
-    await deleteVideos(ids)
-    message.success(`已删除 ${ids.length} 个视频`)
+    if (isInCollectionView.value && imageManagerStore.collectionId != null) {
+      await removeImagesFromCollections({ imageIds: ids, collectionIds: [imageManagerStore.collectionId] })
+      message.success(`已从合集中移除 ${ids.length} 张图片`)
+    } else {
+      await deleteImage(ids)
+      message.success(`已删除 ${ids.length} 张图片`)
+    }
     selection.clearAll()
-    await loadVideoList()
+    await loadImageList()
   } catch (err: any) {
-    message.error(`批量删除失败：${err?.message ?? '未知错误'}`)
+    message.error(`操作失败：${err?.message ?? '未知错误'}`)
   }
 }
 
@@ -613,7 +579,6 @@ function goUpload() {
 
 // ---------- 键盘快捷键 ----------
 function onGlobalKey(ev: KeyboardEvent) {
-  // 在 input / textarea 输入时不触发（除了 / 和 Esc）
   const tag = (ev.target as HTMLElement)?.tagName
   const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (ev.target as HTMLElement)?.isContentEditable
 
@@ -628,8 +593,6 @@ function onGlobalKey(ev: KeyboardEvent) {
       drawerShow.value = false
     } else if (selection.hasSelection.value) {
       selection.clearAll()
-    } else if (hoverPreviewVisible.value) {
-      onPreviewClose()
     }
     return
   }
@@ -653,7 +616,7 @@ function onGlobalKey(ev: KeyboardEvent) {
     return
   }
   if (ev.key === 'Delete' && selection.hasSelection.value) {
-    onBatchDelete()
+    onBatchDeleteOrRemove()
     return
   }
   // 抽屉打开时按 ↑/↓ 切换
@@ -669,17 +632,16 @@ function onGlobalKey(ev: KeyboardEvent) {
 }
 
 onMounted(() => {
+  // 与旧 ImageManager 行为对齐：直访 /manager/image 时强制清掉合集模式标记，
+  // 避免上次从 CollectionDetail 跳过来留下的污染状态。
+  if (route.path === '/manager/image' && collectionDetailStore.img) {
+    collectionDetailStore.img = null
+  }
   loadCollections()
-  loadVideoList()
-  refreshProgress()
-  progressTimer = window.setInterval(refreshProgress, 5000)
+  loadImageList()
   window.addEventListener('keydown', onGlobalKey)
 })
 onBeforeUnmount(() => {
-  if (progressTimer) {
-    window.clearInterval(progressTimer)
-    progressTimer = null
-  }
   // 卸载时清掉等待中的"延迟单击"，避免组件销毁后 timer 触发 openDrawer / 抛错
   clearPendingClick()
   window.removeEventListener('keydown', onGlobalKey)
@@ -687,14 +649,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.video-list-page {
+.image-list-page {
   display: flex;
   flex-direction: column;
   min-height: 100%;
   /*
     页面底色：固定一档冷灰（#f5f6f8），让 #fff 卡片明显浮出来。
-    项目当前固定浅主题（n-config-provider 没传 theme prop），不为了未来
-    可能的深主题切换提前做媒体查询——那时再统一切回 var(--n-body-color)。
+    与视频侧 .video-list-page 保持视觉一致；项目当前固定浅主题，深主题切换再统一改回 var(--n-body-color)。
   */
   background: #f5f6f8;
   color: var(--n-text-color-2);
@@ -711,29 +672,28 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+/*
+  网格密度：图片 1:1 比视频 16:9 紧凑，适当缩小最小宽度让一行容纳更多缩略图。
+  紧凑 / 舒适 / 宽松三档分别对应不同 minmax。
+*/
 .grid-wrap {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
 .density-compact .grid-wrap {
-  gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 .density-spacious .grid-wrap {
   gap: 22px;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 .grid-cell {
   /* drag-select-option 默认 inline，强制 block 让 grid 正常排版 */
   display: block;
 }
 
-/*
-  列表视图：整组行装在一个白卡片里（区别于网格视图的离散卡片）。
-  行之间用 4px gap 而不是 1px divider —— 避免 hover / selected 行边框与
-  divider 在 z 轴上打架；密度紧凑视觉上仍干净。
-*/
 .list-wrap {
   display: flex;
   flex-direction: column;

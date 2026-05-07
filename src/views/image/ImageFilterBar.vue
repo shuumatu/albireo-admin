@@ -2,7 +2,7 @@
   <div class="filter-bar">
     <!-- 主行：标题 / 搜索 / 主筛选下拉 / 视图切换 -->
     <div class="filter-bar__main">
-      <h2 class="page-title">视频管理</h2>
+      <h2 class="page-title">图片管理</h2>
 
       <n-input
         v-model:value="localKeyword"
@@ -23,6 +23,19 @@
         </template>
       </n-input>
 
+      <!--
+        类型：与 video 的 visibility 不一样——图片有"默认仅看 photo"语义，
+        所以下拉里显式提供 4 个选项（全部 / 照片 / 封面 / 其它），
+        不可清空（清空语义模糊），永远在某个值上。
+      -->
+      <n-select
+        :value="state.type ?? 'all'"
+        :options="typeOptions"
+        size="medium"
+        style="width: 120px;"
+        @update:value="onTypeChange"
+      />
+
       <n-select
         :value="state.status"
         placeholder="状态"
@@ -33,19 +46,9 @@
         @update:value="onStatusChange"
       />
 
-      <n-select
-        :value="state.visibility"
-        placeholder="可见性"
-        :options="visibilityOptions"
-        clearable
-        size="medium"
-        style="width: 120px;"
-        @update:value="onVisibilityChange"
-      />
-
       <!--
-        位置过滤：与 ImageFilterBar 同形态。
-        想做"地图相关只看有位置"或"巡检无位置视频"时各取一项。
+        位置过滤：用 pin 风格的小图标 placeholder，下拉只有"有 / 无"两个选项 + 清空 = 全部。
+        定位用户场景："想巡检哪些图还没补位置" → 选"无位置"；"做地图相关时只看有位置的" → 选"有位置"。
       -->
       <n-select
         :value="state.hasLocation"
@@ -144,20 +147,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NInput, NSelect, NButton, NButtonGroup, NDropdown, NTag } from 'naive-ui'
-import type { ViewMode, DensityMode } from './composables/useVideoQuery'
-import type { VideoListOrderBy, VideoListOrder } from '../../api/manager'
+import type { ViewMode, DensityMode } from './composables/useImageQuery'
+import type { ImageListOrderBy, ImageListOrder } from '../../api/images'
 
 interface FilterState {
   keyword: string
+  type: string | null
   status: string | null
-  visibility: string | null
   /** 'yes' / 'no' / null。null = 不过滤 */
   hasLocation: 'yes' | 'no' | null
-  orderBy: VideoListOrderBy
-  order: VideoListOrder
+  orderBy: ImageListOrderBy
+  order: ImageListOrder
   viewMode: ViewMode
   density: DensityMode
-  hoverPreview: boolean
   collectionId: number | null
 }
 
@@ -169,19 +171,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update-keyword', value: string): void
+  (e: 'update-type', value: string | null): void
   (e: 'update-status', value: string | null): void
-  (e: 'update-visibility', value: string | null): void
   (e: 'update-has-location', value: 'yes' | 'no' | null): void
   (e: 'update-collection', value: number | null): void
-  (e: 'update-order', orderBy: VideoListOrderBy, order: VideoListOrder): void
+  (e: 'update-order', orderBy: ImageListOrderBy, order: ImageListOrder): void
   (e: 'change-view', mode: ViewMode): void
   (e: 'change-density', density: DensityMode): void
-  (e: 'toggle-hover-preview'): void
   (e: 'clear-chip', key: string): void
   (e: 'clear-all-filters'): void
 }>()
 
-// keyword 用本地 ref + emit 实现"输入即派发"，由父组件的 useVideoQuery 做 debounce
+// keyword 用本地 ref + emit 实现"输入即派发"，由父组件的 useImageQuery 做 debounce
 const localKeyword = ref(props.state.keyword)
 watch(() => props.state.keyword, (v) => { if (v !== localKeyword.value) localKeyword.value = v })
 
@@ -198,21 +199,21 @@ function flushKeyword() {
   emit('update-keyword', localKeyword.value)
 }
 
+// 'all' 是 UI 层概念，emit 出去会被规整为 null（"全部类型"）
+const typeOptions = [
+  { label: '默认（照片）', value: 'photo' },
+  { label: '全部类型', value: 'all' },
+  { label: '封面', value: 'cover' },
+  { label: '其他', value: 'other' },
+]
+
+// 图片处理状态相对简单，没有 transcoding / ai_analyze 之类
 const statusOptions = [
   { label: '已完成', value: 'done' },
   { label: '上传中', value: 'uploading' },
   { label: '待处理', value: 'pending' },
   { label: '处理中', value: 'processing' },
-  { label: '转码中', value: 'transcoding' },
-  { label: 'AI 分析中', value: 'ai_analyzing' },
   { label: '处理失败', value: 'failed' },
-  { label: 'AI 分析失败', value: 'ai_analyze_failed' },
-]
-
-const visibilityOptions = [
-  { label: '公开', value: 'public' },
-  { label: '好友可见', value: 'friends' },
-  { label: '私密', value: 'private' },
 ]
 
 const locationOptions = [
@@ -228,8 +229,8 @@ const orderOptions = [
   { label: '最新创建', value: 'createdAt:desc' },
   { label: '最早创建', value: 'createdAt:asc' },
   { label: '最近修改', value: 'updatedAt:desc' },
-  { label: '时长 长 → 短', value: 'duration:desc' },
-  { label: '时长 短 → 长', value: 'duration:asc' },
+  { label: '拍摄时间 新 → 旧', value: 'shotAt:desc' },
+  { label: '拍摄时间 旧 → 新', value: 'shotAt:asc' },
 ]
 
 const orderKey = computed(() => `${props.state.orderBy}:${props.state.order}`)
@@ -243,22 +244,18 @@ const settingsOptions = computed(() => [
   { label: '紧凑', key: 'density-compact' },
   { label: '舒适', key: 'density-cozy' },
   { label: '宽松', key: 'density-spacious' },
-  { type: 'divider', key: 'd1' },
-  {
-    label: () => (props.state.hoverPreview ? '悬停预览：开 (点击关闭)' : '悬停预览：关 (点击开启)'),
-    key: 'toggle-preview',
-  },
 ])
 
 function densityLabel(d: DensityMode): string {
   return d === 'compact' ? '紧凑' : d === 'spacious' ? '宽松' : '舒适'
 }
 
+function onTypeChange(v: string | null) {
+  // 'all' UI 值映射到 state 的 null（"全部类型"）
+  emit('update-type', v === 'all' ? null : v)
+}
 function onStatusChange(v: string | null) {
   emit('update-status', v)
-}
-function onVisibilityChange(v: string | null) {
-  emit('update-visibility', v)
 }
 function onHasLocationChange(v: 'yes' | 'no' | null) {
   emit('update-has-location', v)
@@ -268,14 +265,12 @@ function onCollectionChange(v: string | null) {
 }
 function onOrderChange(v: string | null) {
   if (!v) return
-  const [orderBy, order] = v.split(':') as [VideoListOrderBy, VideoListOrder]
+  const [orderBy, order] = v.split(':') as [ImageListOrderBy, ImageListOrder]
   emit('update-order', orderBy, order)
 }
 function onSettingsSelect(key: string) {
   if (key.startsWith('density-')) {
     emit('change-density', key.replace('density-', '') as DensityMode)
-  } else if (key === 'toggle-preview') {
-    emit('toggle-hover-preview')
   }
 }
 </script>
@@ -286,13 +281,12 @@ function onSettingsSelect(key: string) {
   top: 0;
   z-index: 30;
   /*
-    底色与页面 body bg (#f5f6f8) 互补：用接近 cardColor 的 92% 不透明 + 强 blur，
+    底色与页面 body bg 互补：用接近 cardColor 的 92% 不透明 + 强 blur，
     sticky 时下方内容透出一点冷灰，制造"飘"的层次感。
   */
   background: color-mix(in srgb, var(--n-card-color) 92%, transparent);
   padding: 14px 20px 10px 20px;
   border-bottom: 1px solid var(--n-divider-color);
-  /* 极细底影暗示"浮在内容之上" */
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02), 0 6px 12px -8px rgba(0, 0, 0, 0.08);
   backdrop-filter: saturate(1.4) blur(10px);
   -webkit-backdrop-filter: saturate(1.4) blur(10px);

@@ -1,19 +1,19 @@
 <template>
   <div
     :class="[
-      'video-card',
-      { 'video-card--selected': selected, 'video-card--needs-attention': attention, 'video-card--has-selection-mode': hasSelection },
+      'image-card',
+      { 'image-card--selected': selected, 'image-card--needs-attention': attention, 'image-card--has-selection-mode': hasSelection },
     ]"
     @click="onCardClick"
     @dblclick="onCardDblClick"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
-    <!-- 16:9 封面区，整张图作背景 -->
+    <!-- 1:1 方形封面区，整张图作背景 -->
     <div class="cover-wrapper" ref="coverWrapper">
       <img
-        v-if="video.coverUrl"
-        :src="video.coverUrl"
+        v-if="!coverFailed && cover"
+        :src="cover"
         :alt="title"
         class="cover-img"
         loading="lazy"
@@ -21,10 +21,10 @@
       />
       <div v-else class="cover-placeholder">
         <span class="cover-placeholder__ext">{{ extension }}</span>
-        <span class="cover-placeholder__name">{{ video.fileName }}</span>
+        <span class="cover-placeholder__name">{{ image.fileName }}</span>
       </div>
 
-      <!-- 左上：分辨率徽标 + 选中复选框（hover 或已有选中时显形） -->
+      <!-- 左上：类型徽标 + 选中复选框（hover 或已有选中时显形） -->
       <div class="badge-top-left">
         <div
           class="select-box"
@@ -33,16 +33,18 @@
         >
           <n-checkbox :checked="selected" :focusable="false" />
         </div>
-        <div v-if="resolution" class="badge badge--resolution">
-          {{ resolution }}
+        <div v-if="typeText" :class="['badge', `badge--type-${image.type}`]">
+          {{ typeText }}
         </div>
       </div>
 
-      <!-- 右上：位置图钉 + 时长徽标 + 失败红点 -->
+      <!-- 右上：位置图钉 + 失败红点 -->
       <div class="badge-top-right">
         <!--
-          位置 badge：与 ImageCard 同形态。已定位用主色 pin，未定位用灰色 outline pin，
-          老接口未返回 hasLocation 时不显示。
+          位置 badge：扫一眼就能识别这张图是否定位了。
+          - hasLocation === true：实心 pin，绿系底色（"已定位"）
+          - hasLocation === false：outline pin，灰系底色（"未定位"，对运营是补位置的提示）
+          - hasLocation 为 null/undefined（老接口兜底）：不渲染
         -->
         <div
           v-if="hasLocation === true"
@@ -71,31 +73,20 @@
           </svg>
         </div>
         <div v-if="attention" class="attention-dot" title="处理失败，需要您处理" />
-        <div v-if="duration" class="badge badge--duration">{{ duration }}</div>
       </div>
 
-      <!-- 处理中状态遮罩（含顶部进度条 / 状态文本 / 重试按钮） -->
-      <VideoStatusOverlay
+      <!-- 处理中状态遮罩（含状态文本 / 重试按钮） -->
+      <ImageStatusOverlay
         v-if="overlayStatus"
         :status="overlayStatus"
-        :progress="progress ?? null"
-        @retry="$emit('retry', video)"
+        @retry="$emit('retry', image)"
       />
 
       <!-- 底部渐变 + 标题信息条 -->
       <div class="info-strip">
         <div class="info-strip__title" :title="title">{{ title }}</div>
         <div class="info-strip__meta">
-          <n-tag
-            v-if="visibilityTxt"
-            size="small"
-            :type="visibilityType"
-            :bordered="false"
-            class="meta-tag"
-          >
-            {{ visibilityTxt }}
-          </n-tag>
-          <span class="info-strip__time" :title="video.createdAt">{{ relTime }}</span>
+          <span class="info-strip__time" :title="image.createdAt || ''">{{ relTime }}</span>
           <span v-if="firstCollectionName" class="info-strip__collection" :title="firstCollectionName">
             · {{ firstCollectionName }}
           </span>
@@ -123,55 +114,51 @@
 
 <script setup lang="ts">
 import { computed, ref, h } from 'vue'
-import { NCheckbox, NDropdown, NTag } from 'naive-ui'
-import VideoStatusOverlay from './VideoStatusOverlay.vue'
+import { NCheckbox, NDropdown } from 'naive-ui'
+import ImageStatusOverlay from './ImageStatusOverlay.vue'
 import {
-  formatDuration,
-  resolutionLabel,
+  toMediumUrl,
+  imageTypeLabel,
+  imageNeedsAttention,
   formatRelative,
   fileExtensionUpper,
-  visibilityText,
-  visibilityTagType,
-  needsAttention,
-} from './composables/videoFormat'
-import type { VideoItem } from '../../api/manager'
+} from './composables/imageFormat'
+import type { ImageItem } from '../../api/images'
 
 const props = defineProps<{
-  video: VideoItem
+  image: ImageItem
   selected: boolean
   /** 是否已有任何选中（控制 checkbox 是否常驻可见） */
   hasSelection: boolean
-  /** 转码进度（0-100），由父组件根据 task progress 注入 */
-  progress?: number | null
 }>()
 
 const emit = defineEmits<{
-  (e: 'click', video: VideoItem, ev: MouseEvent): void
-  (e: 'dblclick', video: VideoItem): void
-  (e: 'check', video: VideoItem, ev: MouseEvent): void
-  (e: 'preview', video: VideoItem, anchor: HTMLElement): void
-  (e: 'preview-close'): void
-  (e: 'menu', video: VideoItem, action: string): void
-  (e: 'retry', video: VideoItem): void
+  (e: 'click', image: ImageItem, ev: MouseEvent): void
+  (e: 'dblclick', image: ImageItem): void
+  (e: 'check', image: ImageItem, ev: MouseEvent): void
+  (e: 'menu', image: ImageItem, action: string): void
+  (e: 'retry', image: ImageItem): void
 }>()
 
 const coverWrapper = ref<HTMLElement | null>(null)
 const coverFailed = ref(false)
 const isHovering = ref(false)
 
-const title = computed(() => props.video.title || props.video.fileName || '未命名视频')
-const extension = computed(() => fileExtensionUpper(props.video.fileName))
-const duration = computed(() => formatDuration(props.video.durationMs))
-const resolution = computed(() => resolutionLabel(props.video.width, props.video.height))
-const relTime = computed(() => formatRelative(props.video.createdAt))
-const visibilityTxt = computed(() => visibilityText(props.video.visibility))
-const visibilityType = computed(() => visibilityTagType(props.video.visibility))
-const attention = computed(() => needsAttention(props.video.status))
+const title = computed(() => props.image.title || props.image.fileName || '未命名图片')
+const extension = computed(() => fileExtensionUpper(props.image.fileName))
+const cover = computed(() => toMediumUrl(props.image.imageUrl))
+const relTime = computed(() => formatRelative(props.image.createdAt))
+const typeText = computed(() => imageTypeLabel(props.image.type))
+const attention = computed(() => imageNeedsAttention(props.image.status))
 
-const firstCollectionName = computed(() => props.video.collections?.[0]?.name ?? '')
+const firstCollectionName = computed(() => props.image.collections?.[0]?.name ?? '')
 
+/**
+ * 位置态：true / false / null。
+ * - 老接口未升级时 hasLocation 为 undefined → 归到 null（不显示），避免误判全部为"未定位"。
+ */
 const hasLocation = computed<boolean | null>(() => {
-  const v = props.video.hasLocation
+  const v = props.image.hasLocation
   if (v === true) return true
   if (v === false) return false
   return null
@@ -184,24 +171,30 @@ const hasLocation = computed<boolean | null>(() => {
  * 失败也走遮罩，因为我们要在卡片中央显示重试按钮。
  */
 const overlayStatus = computed(() => {
-  const s = props.video.status
+  const s = props.image.status
   if (!s || s === 'done') return ''
   return s
 })
 
-/** checkbox 的可见性：选中、已经在选中模式、或鼠标悬停在卡片上 */
 const showCheckbox = computed(() => props.selected || props.hasSelection || isHovering.value)
 
 const menuOptions = computed(() => {
-  const opts: any[] = [
-    { label: '编辑', key: 'edit' },
-    { label: '在新标签页打开', key: 'open-public' },
-  ]
-  if (!overlayStatus.value) {
-    opts.push({ label: '设置封面帧', key: 'set-cover' })
+  const s = props.image.status
+  const canEdit = !s || s === 'done' || s === 'pending'
+  const opts: any[] = []
+  if (canEdit) {
+    opts.push({ label: '编辑', key: 'edit' })
+    // 与视频侧对齐：菜单提供"在新标签页打开"作为双击的等价入口，
+    // 用键盘党 / 触屏没法双击的场景兜底。
+    opts.push({ label: '在新标签页打开', key: 'open-public' })
+    opts.push({ label: '位置信息', key: 'location' })
+    opts.push({ label: 'EXIF 信息', key: 'exif' })
+    opts.push({ label: '评论', key: 'comment' })
   }
-  opts.push({ label: '复制对象 Key', key: 'copy-key' })
-  opts.push({ type: 'divider', key: 'd1' })
+  if (s === 'failed') {
+    opts.push({ label: '重试', key: 'retry' })
+  }
+  if (opts.length > 0) opts.push({ type: 'divider', key: 'd1' })
   opts.push({
     label: () => h('span', { style: { color: 'var(--n-error-color, #d03050)' } }, '删除'),
     key: 'delete',
@@ -210,102 +203,84 @@ const menuOptions = computed(() => {
 })
 
 function onCardClick(ev: MouseEvent) {
-  emit('click', props.video, ev)
+  emit('click', props.image, ev)
 }
 
 function onCardDblClick() {
-  // 双击在父级被翻译成"打开公共站详情页"。父级会在收到 dblclick 时
-  // 取消同时到达的 click 触发的 openDrawer，避免抽屉和新标签页同时出现。
-  emit('dblclick', props.video)
+  // 双击在父级被翻译成"在新标签页打开公共站详情"。父级会取消同时到达的 click 触发
+  // 的 openDrawer，避免抽屉和新标签页同时出现。
+  emit('dblclick', props.image)
 }
 
 function onCheckboxClick(ev: MouseEvent) {
-  emit('check', props.video, ev)
+  emit('check', props.image, ev)
 }
 
-/**
- * Hover 预览：去掉中央 play 按钮后，整张卡片就是预览触发面。
- *  - mouseenter 起 600 ms 计时器，到时再 emit('preview')，避免鼠标只是从一张卡上掠过
- *    就发起请求；
- *  - mouseleave 立即清掉计时器并 emit('preview-close')，让 hover popover 关闭。
- * isHovering 仍然要维护，因为 checkbox 显隐依赖它。
- */
-let previewTimer: number | null = null
 function onMouseEnter() {
   isHovering.value = true
-  if (previewTimer) window.clearTimeout(previewTimer)
-  previewTimer = window.setTimeout(() => {
-    if (isHovering.value && coverWrapper.value) {
-      emit('preview', props.video, coverWrapper.value)
-    }
-  }, 600)
 }
 function onMouseLeave() {
   isHovering.value = false
-  if (previewTimer) {
-    window.clearTimeout(previewTimer)
-    previewTimer = null
-  }
-  emit('preview-close')
 }
 
 function onMenuSelect(action: string) {
-  emit('menu', props.video, action)
+  emit('menu', props.image, action)
 }
 </script>
 
 <style scoped>
-.video-card {
+.image-card {
   position: relative;
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
   background: var(--n-card-color);
   /*
-    静态轮廓用 1px 边框 + 极轻底影，浅色页面 (#f5f6f8) 上既能浮起来又不显脏；
-    hover 时把 y 偏移做大、阴影"长腿"，鼠标移过去有明显反馈。
+    静态轮廓用 1px 边框 + 极轻底影；hover 时把 y 偏移做大、阴影"长腿"，
+    与 VideoCard 同一套交互节奏。
   */
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.06),
     0 1px 2px rgba(0, 0, 0, 0.04);
   transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
-.video-card:hover {
+.image-card:hover {
   transform: translateY(-3px);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.08),
     0 4px 8px rgba(0, 0, 0, 0.06),
     0 16px 32px -8px rgba(0, 0, 0, 0.16);
 }
-/* 选中态：实色环 + 一抹淡背景，让"已选"在缩略图周边一眼可辨 */
-.video-card--selected {
+.image-card--selected {
   box-shadow: 0 0 0 2px var(--n-primary-color);
 }
-.video-card--selected:hover {
+.image-card--selected:hover {
   box-shadow:
     0 0 0 2px var(--n-primary-color),
     0 8px 24px rgba(0, 0, 0, 0.12);
 }
-.video-card--needs-attention {
+.image-card--needs-attention {
   box-shadow: 0 0 0 2px var(--n-error-color);
 }
-.video-card--needs-attention:hover {
+.image-card--needs-attention:hover {
   box-shadow:
     0 0 0 2px var(--n-error-color),
     0 8px 24px rgba(208, 48, 80, 0.18);
 }
-.video-card--needs-attention.video-card--selected {
-  /* 同时选中 + 失败：外失败红环 + 内选中绿环 */
+.image-card--needs-attention.image-card--selected {
   box-shadow:
     0 0 0 2px var(--n-error-color),
     0 0 0 4px var(--n-primary-color);
 }
 
-/* 封面区永远是深底（不管主题），因为视频缩略图本身就在黑底上更出彩 */
+/*
+  封面区方形栅格，深底——当 cover 加载中 / 透明 PNG 仍能保持视觉稳定。
+  与 VideoCard 16:9 不同：图片 1:1 更适合多张图横向铺满网格。
+*/
 .cover-wrapper {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 1 / 1;
   background: #0e0e12;
   overflow: hidden;
 }
@@ -368,13 +343,9 @@ function onMenuSelect(action: string) {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
-.badge--resolution {
-  background: rgba(40, 32, 70, 0.78);
-  color: #e0d5ff;
-}
-.badge--duration {
-  background: rgba(0, 0, 0, 0.66);
-}
+.badge--type-photo  { background: rgba(22, 119, 60, 0.78); color: #d8ffe2; }
+.badge--type-cover  { background: rgba(40, 32, 70, 0.78); color: #e0d5ff; }
+.badge--type-other  { background: rgba(60, 60, 60, 0.78); color: #f0f0f0; }
 
 .attention-dot {
   width: 8px;
@@ -385,8 +356,8 @@ function onMenuSelect(action: string) {
 }
 
 /*
-  位置 badge：与 ImageCard 共享一套视觉，确保两个管理页扫到的"已定位/未定位"
-  视觉信号完全一致。
+  位置 badge：与时长徽标 / 类型徽标视觉量级对齐，但更克制——18x18 圆角方，
+  不喧宾夺主。"已定位"用主色，"未定位"用浅灰，让缺失态在缩略图上仍可辨。
 */
 .loc-badge {
   width: 18px;
@@ -462,9 +433,6 @@ function onMenuSelect(action: string) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.meta-tag {
-  pointer-events: none;
-}
 
 .more-btn {
   position: absolute;
@@ -484,8 +452,8 @@ function onMenuSelect(action: string) {
   transition: opacity 0.18s ease, background 0.18s ease;
   z-index: 5;
 }
-.video-card:hover .more-btn,
-.video-card--has-selection-mode .more-btn {
+.image-card:hover .more-btn,
+.image-card--has-selection-mode .more-btn {
   opacity: 1;
 }
 .more-btn:hover {

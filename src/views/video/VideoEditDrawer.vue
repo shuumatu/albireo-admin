@@ -170,7 +170,7 @@
             <LocationPicker
               v-if="show"
               v-model="locationModel"
-              height="240px"
+              height="420px"
             />
             <n-flex justify="flex-end" style="margin-top: 8px;">
               <n-button size="small" @click="onLocationSave">保存位置</n-button>

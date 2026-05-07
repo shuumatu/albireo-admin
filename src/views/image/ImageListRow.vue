@@ -1,33 +1,31 @@
 <template>
   <div
     :class="[
-      'video-row',
-      { 'video-row--selected': selected, 'video-row--needs-attention': attention },
+      'image-row',
+      { 'image-row--selected': selected, 'image-row--needs-attention': attention },
     ]"
     @click="onRowClick"
     @dblclick="onRowDblClick"
   >
     <!-- 左侧 checkbox：始终可见，列表场景下不绕弯子 -->
     <div class="row-check" @click.stop>
-      <n-checkbox :checked="selected" @update:checked="$emit('check', video, $event)" />
+      <n-checkbox :checked="selected" @update:checked="$emit('check', image, $event)" />
     </div>
 
-    <!-- 缩略图 + 时长 / 分辨率徽标 -->
+    <!-- 缩略图 + 状态遮罩 -->
     <div class="row-thumb">
       <img
-        v-if="video.coverUrl"
-        :src="video.coverUrl"
+        v-if="!coverFailed && cover"
+        :src="cover"
         :alt="title"
         loading="lazy"
         @error="coverFailed = true"
       />
       <div v-else class="thumb-placeholder">{{ extension }}</div>
-      <div v-if="duration" class="thumb-duration">{{ duration }}</div>
-      <VideoStatusOverlay
+      <ImageStatusOverlay
         v-if="overlayStatus"
         :status="overlayStatus"
-        :progress="progress ?? null"
-        @retry="$emit('retry', video)"
+        @retry="$emit('retry', image)"
       />
     </div>
 
@@ -38,15 +36,20 @@
         <span v-if="attention" class="attention-pill">需处理</span>
       </div>
       <div class="row-info__meta">
-        <span v-if="resolution" class="meta-piece">{{ resolution }}</span>
-        <span v-if="resolution && fileSize" class="meta-sep">·</span>
-        <span v-if="fileSize" class="meta-piece">{{ fileSize }}</span>
-        <span v-if="(resolution || fileSize) && firstCollectionName" class="meta-sep">·</span>
+        <span v-if="typeText" class="meta-piece">{{ typeText }}</span>
+        <span v-if="typeText && firstCollectionName" class="meta-sep">·</span>
         <span v-if="firstCollectionName" class="meta-piece" :title="firstCollectionName">合集：{{ firstCollectionName }}</span>
+        <span v-if="(typeText || firstCollectionName) && shotAtText" class="meta-sep">·</span>
+        <span v-if="shotAtText" class="meta-piece">{{ shotAtText }}</span>
+        <!--
+          位置态：列表场景下信息密度高，"未定位"是更值得提示的，所以这一档显示文字提醒；
+          "已定位" 仅显示一个小图钉，避免每行都长出冗余文字。
+          老接口未返回 hasLocation 时不显示，避免误判。
+        -->
         <span
           v-if="hasLocation === false"
           class="meta-sep"
-          :class="{ 'meta-sep--invisible': !(resolution || fileSize || firstCollectionName) }"
+          :class="{ 'meta-sep--invisible': !(typeText || firstCollectionName || shotAtText) }"
         >·</span>
         <span
           v-if="hasLocation === false"
@@ -76,25 +79,25 @@
           </svg>
         </span>
       </div>
-      <div v-if="video.description" class="row-info__desc" :title="video.description">{{ video.description }}</div>
+      <div v-if="image.description" class="row-info__desc" :title="image.description">{{ image.description }}</div>
     </div>
 
     <!-- 右侧状态 / 时间 / 菜单 -->
     <div class="row-aside" @click.stop>
       <n-tag
-        v-if="visibilityTxt"
+        v-if="typeText"
         size="small"
-        :type="visibilityType"
+        :type="typeTag"
         :bordered="false"
       >
-        {{ visibilityTxt }}
+        {{ typeText }}
       </n-tag>
-      <span class="row-aside__time" :title="video.createdAt">{{ relTime }}</span>
+      <span class="row-aside__time" :title="image.createdAt || ''">{{ relTime }}</span>
       <n-dropdown
         :options="menuOptions"
         trigger="click"
         placement="bottom-end"
-        @select="(action: string) => $emit('menu', video, action)"
+        @select="(action: string) => $emit('menu', image, action)"
       >
         <n-button quaternary circle size="small">
           <svg viewBox="0 0 24 24" width="16" height="16">
@@ -111,84 +114,97 @@
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
 import { NCheckbox, NButton, NDropdown, NTag } from 'naive-ui'
-import VideoStatusOverlay from './VideoStatusOverlay.vue'
+import ImageStatusOverlay from './ImageStatusOverlay.vue'
 import {
-  formatDuration,
-  resolutionLabel,
-  formatBytes,
+  toMediumUrl,
+  imageTypeLabel,
+  imageTypeTagType,
+  imageNeedsAttention,
   formatRelative,
   fileExtensionUpper,
-  visibilityText,
-  visibilityTagType,
-  needsAttention,
-} from './composables/videoFormat'
-import type { VideoItem } from '../../api/manager'
+} from './composables/imageFormat'
+import type { ImageItem } from '../../api/images'
 
 const props = defineProps<{
-  video: VideoItem
+  image: ImageItem
   selected: boolean
   hasSelection: boolean
-  progress?: number | null
 }>()
 
 const emit = defineEmits<{
-  (e: 'click', video: VideoItem, ev: MouseEvent): void
-  (e: 'dblclick', video: VideoItem): void
-  (e: 'check', video: VideoItem, checked: boolean): void
-  (e: 'menu', video: VideoItem, action: string): void
-  (e: 'retry', video: VideoItem): void
+  (e: 'click', image: ImageItem, ev: MouseEvent): void
+  (e: 'dblclick', image: ImageItem): void
+  (e: 'check', image: ImageItem, checked: boolean): void
+  (e: 'menu', image: ImageItem, action: string): void
+  (e: 'retry', image: ImageItem): void
 }>()
 
 const coverFailed = ref(false)
 
-const title = computed(() => props.video.title || props.video.fileName || '未命名视频')
-const extension = computed(() => fileExtensionUpper(props.video.fileName))
-const duration = computed(() => formatDuration(props.video.durationMs))
-const resolution = computed(() => resolutionLabel(props.video.width, props.video.height))
-const fileSize = computed(() => formatBytes(props.video.fileSize))
-const relTime = computed(() => formatRelative(props.video.createdAt))
-const visibilityTxt = computed(() => visibilityText(props.video.visibility))
-const visibilityType = computed(() => visibilityTagType(props.video.visibility))
-const attention = computed(() => needsAttention(props.video.status))
-const firstCollectionName = computed(() => props.video.collections?.[0]?.name ?? '')
+const title = computed(() => props.image.title || props.image.fileName || '未命名图片')
+const extension = computed(() => fileExtensionUpper(props.image.fileName))
+const cover = computed(() => toMediumUrl(props.image.imageUrl))
+const relTime = computed(() => formatRelative(props.image.createdAt))
+const typeText = computed(() => imageTypeLabel(props.image.type))
+const typeTag = computed(() => imageTypeTagType(props.image.type))
+const attention = computed(() => imageNeedsAttention(props.image.status))
+const firstCollectionName = computed(() => props.image.collections?.[0]?.name ?? '')
+
+const shotAtText = computed(() => {
+  if (!props.image.shotAt) return ''
+  const d = new Date(props.image.shotAt)
+  if (Number.isNaN(d.getTime())) return ''
+  return `拍摄：${d.toLocaleDateString('zh-CN')}`
+})
 
 const hasLocation = computed<boolean | null>(() => {
-  const v = props.video.hasLocation
+  const v = props.image.hasLocation
   if (v === true) return true
   if (v === false) return false
   return null
 })
 
 const overlayStatus = computed(() => {
-  const s = props.video.status
+  const s = props.image.status
   if (!s || s === 'done') return ''
   return s
 })
 
-const menuOptions = computed(() => [
-  { label: '编辑', key: 'edit' },
-  { label: '在新标签页打开', key: 'open-public' },
-  { label: '设置封面帧', key: 'set-cover' },
-  { label: '复制对象 Key', key: 'copy-key' },
-  { type: 'divider', key: 'd1' },
-  {
+const menuOptions = computed(() => {
+  const s = props.image.status
+  const canEdit = !s || s === 'done' || s === 'pending'
+  const opts: any[] = []
+  if (canEdit) {
+    opts.push({ label: '编辑', key: 'edit' })
+    // 与 ImageCard / VideoListRow 对齐：菜单提供"在新标签页打开"作为双击的键盘 / 触屏兜底入口
+    opts.push({ label: '在新标签页打开', key: 'open-public' })
+    opts.push({ label: '位置信息', key: 'location' })
+    opts.push({ label: 'EXIF 信息', key: 'exif' })
+    opts.push({ label: '评论', key: 'comment' })
+  }
+  if (s === 'failed') {
+    opts.push({ label: '重试', key: 'retry' })
+  }
+  if (opts.length > 0) opts.push({ type: 'divider', key: 'd1' })
+  opts.push({
     label: () => h('span', { style: { color: 'var(--n-error-color, #d03050)' } }, '删除'),
     key: 'delete',
-  },
-])
+  })
+  return opts
+})
 
+void emit
 function onRowClick(ev: MouseEvent) {
-  emit('click', props.video, ev)
+  emit('click', props.image, ev)
 }
 
 function onRowDblClick() {
-  // 父级在 dblclick 到达时取消同时到达的 click 触发的 openDrawer，跳到公共站详情页
-  emit('dblclick', props.video)
+  emit('dblclick', props.image)
 }
 </script>
 
 <style scoped>
-.video-row {
+.image-row {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -198,19 +214,17 @@ function onRowDblClick() {
   border: 1px solid transparent;
   transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-/* hover 用极淡的中性灰，浅色主题加深 / 深色主题提亮都自然 */
-.video-row:hover {
+.image-row:hover {
   background: rgba(0, 0, 0, 0.04);
 }
-/* 选中：用 primary 半透明背景 + 边框做强信号，浅色主题上仍清晰可辨 */
-.video-row--selected {
+.image-row--selected {
   background: color-mix(in srgb, var(--n-primary-color) 10%, transparent);
   border-color: color-mix(in srgb, var(--n-primary-color) 45%, transparent);
 }
-.video-row--selected:hover {
+.image-row--selected:hover {
   background: color-mix(in srgb, var(--n-primary-color) 14%, transparent);
 }
-.video-row--needs-attention {
+.image-row--needs-attention {
   border-color: color-mix(in srgb, var(--n-error-color) 50%, transparent);
   background: color-mix(in srgb, var(--n-error-color) 4%, transparent);
 }
@@ -219,14 +233,17 @@ function onRowDblClick() {
   flex: 0 0 auto;
 }
 
+/*
+  行视图缩略图：68x68 方形（与 VideoListRow 的 120x68 不同），
+  让多张图列表的视觉密度更高。
+*/
 .row-thumb {
   position: relative;
   flex: 0 0 auto;
-  width: 120px;
+  width: 68px;
   height: 68px;
   border-radius: 6px;
   overflow: hidden;
-  /* 缩略图永远黑底（视频天然黑底好看） */
   background: #0e0e12;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
@@ -245,16 +262,6 @@ function onRowDblClick() {
   color: rgba(255, 255, 255, 0.6);
   font-size: 11px;
   font-weight: 600;
-}
-.thumb-duration {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
-  font-size: 10px;
-  padding: 1px 4px;
-  border-radius: 2px;
 }
 
 .row-info {
@@ -297,6 +304,10 @@ function onRowDblClick() {
   margin: 0 6px;
   opacity: 0.5;
 }
+/*
+  当"未定位"是 meta 行第一项时，前面没东西可分隔，藏掉这个分隔点
+  仍然占位避免布局抖动（visibility:hidden 而不是 display:none）。
+*/
 .meta-sep--invisible {
   visibility: hidden;
   margin: 0;

@@ -1,23 +1,24 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { VideoListOrder, VideoListOrderBy } from '../../../api/manager'
+import type { ImageListOrder, ImageListOrderBy } from '../../../api/images'
 
 /**
- * 视频管理页的查询条件 + URL 同步。
+ * 图片管理页的查询条件 + URL 同步。
  *
- * 设计原则：
- *  - 所有"用户视角的状态"都同步到 query string，刷新 / 分享链接 / 浏览器返回都能保留筛选；
- *  - URL 变更走 router.replace（而非 push），避免每次输入搜索都把历史栈灌满；
- *  - keyword 用 350ms debounce 才同步到 URL（频繁打字不刷历史）。
+ * 设计与 useVideoQuery 对齐：所有"用户视角的状态"都同步到 query string，刷新 / 分享链接 / 浏览器返回都能保留筛选；
+ *  - URL 变更走 router.replace，避免每次输入搜索都把历史栈灌满；
+ *  - keyword 用 350ms debounce 才同步到 URL；
  *
- * 状态契约：
- *  - keyword: 关键词（标题 / 文件名 / 描述模糊匹配，由后端处理）
- *  - status / visibility: 单选字符串（后端精确匹配）
- *  - orderBy / order: 排序键 + 方向，白名单由后端 VideoService 保护
- *  - page / pageSize: 分页
- *  - viewMode: 'list' | 'grid'，仅前端状态但也持久化以提升体感
- *  - density: 'compact' | 'cozy' | 'spacious'，影响网格列数 / 行高
- *  - hoverPreview: 是否启用悬停短预览，移动端 / 弱网默认关
+ * 与 useVideoQuery 的差异：
+ *  - 图片没有 visibility，但多了一个 type（photo / cover / other）业务分类；
+ *  - 图片管理"默认只看 photo"——cover/poster/avatar 之类多由系统流程产出，
+ *    平时维护时反而是噪声。所以 DEFAULT_STATE.type = 'photo'，URL 上无 type 参数时回归 photo；
+ *    若用户主动切到"全部"，URL 上写 type=all 显式表达"我要看所有类型"，这样
+ *    刷新 / 分享链接才能保留这个意图。
+ *  - 排序键白名单：createdAt / updatedAt / shotAt；
+ *  - 不需要 hoverPreview（图片无视频预览语义）。
+ *
+ * 共享字段：hasLocation（'yes' / 'no' / null）——便于运营巡检"无位置图"。
  */
 export type ViewMode = 'list' | 'grid'
 export type DensityMode = 'compact' | 'cozy' | 'spacious'
@@ -25,30 +26,35 @@ export type DensityMode = 'compact' | 'cozy' | 'spacious'
 /** 位置过滤三态。null = 不过滤；'yes' = 有位置；'no' = 无位置 */
 export type HasLocationFilter = 'yes' | 'no' | null
 
-export interface VideoQueryState {
+export interface ImageQueryState {
   keyword: string
+  /**
+   * 业务类型 photo/cover/other。
+   * null 表示"全部类型"——用户主动选择，URL 上以 type=all 表达。
+   * 默认值 'photo'：管理页只关注用户上传的照片，不被封面/海报等系统图刷屏。
+   */
+  type: string | null
+  /** 处理状态精确匹配 */
   status: string | null
-  visibility: string | null
   /** 是否有 PostGIS 位置；'yes' / 'no' / null */
   hasLocation: HasLocationFilter
   /**
    * 合集筛选。null = 全部；0 在 URL 里被规整为 null。
-   * 与 collectionStore.activeCollectionId 双向同步：URL 是更高优先级（刷新 / 分享 / 浏览器返回都靠它）。
+   * 与 collectionStore.activeCollectionId 双向同步：URL 是更高优先级。
    */
   collectionId: number | null
-  orderBy: VideoListOrderBy
-  order: VideoListOrder
+  orderBy: ImageListOrderBy
+  order: ImageListOrder
   page: number
   pageSize: number
   viewMode: ViewMode
   density: DensityMode
-  hoverPreview: boolean
 }
 
-const DEFAULT_STATE: VideoQueryState = {
+const DEFAULT_STATE: ImageQueryState = {
   keyword: '',
+  type: 'photo',
   status: null,
-  visibility: null,
   hasLocation: null,
   collectionId: null,
   orderBy: 'createdAt',
@@ -57,25 +63,36 @@ const DEFAULT_STATE: VideoQueryState = {
   pageSize: 20,
   viewMode: 'grid',
   density: 'cozy',
-  hoverPreview: true,
 }
 
-const ALLOWED_ORDER_BY: VideoListOrderBy[] = ['createdAt', 'updatedAt', 'duration']
+const ALLOWED_ORDER_BY: ImageListOrderBy[] = ['createdAt', 'updatedAt', 'shotAt']
 const ALLOWED_VIEW_MODE: ViewMode[] = ['list', 'grid']
 const ALLOWED_DENSITY: DensityMode[] = ['compact', 'cozy', 'spacious']
+const ALLOWED_TYPE: string[] = ['photo', 'cover', 'other']
 
-function parseInitialState(query: Record<string, any>): VideoQueryState {
-  const s: VideoQueryState = { ...DEFAULT_STATE }
+function parseInitialState(query: Record<string, any>): ImageQueryState {
+  const s: ImageQueryState = { ...DEFAULT_STATE }
   if (typeof query.q === 'string') s.keyword = query.q
+
+  // type 三态：未传 → 'photo'（默认）；'all' → null（用户显式选全部）；其它合法值 → 原样
+  if (typeof query.type === 'string') {
+    if (query.type === 'all') {
+      s.type = null
+    } else if ((ALLOWED_TYPE as string[]).includes(query.type)) {
+      s.type = query.type
+    }
+    // 非法值忽略，保持 DEFAULT_STATE.type='photo'
+  }
+
   if (typeof query.status === 'string' && query.status) s.status = query.status
-  if (typeof query.visibility === 'string' && query.visibility) s.visibility = query.visibility
   if (query.hasLocation === 'yes' || query.hasLocation === 'no') {
     s.hasLocation = query.hasLocation
   }
+
   const cid = Number(query.collectionId)
   if (Number.isFinite(cid) && cid > 0) s.collectionId = Math.floor(cid)
   if (typeof query.orderBy === 'string' && (ALLOWED_ORDER_BY as string[]).includes(query.orderBy)) {
-    s.orderBy = query.orderBy as VideoListOrderBy
+    s.orderBy = query.orderBy as ImageListOrderBy
   }
   if (query.order === 'asc' || query.order === 'desc') s.order = query.order
   const page = Number(query.page)
@@ -88,15 +105,21 @@ function parseInitialState(query: Record<string, any>): VideoQueryState {
   if (typeof query.density === 'string' && (ALLOWED_DENSITY as string[]).includes(query.density)) {
     s.density = query.density as DensityMode
   }
-  if (query.preview === '0') s.hoverPreview = false
   return s
 }
 
-function stateToQuery(s: VideoQueryState): Record<string, string> {
+function stateToQuery(s: ImageQueryState): Record<string, string> {
   const q: Record<string, string> = {}
   if (s.keyword) q.q = s.keyword
+
+  // type 编码：默认 photo 不写；null（"全部"）写 type=all；其它原样
+  if (s.type === null) {
+    q.type = 'all'
+  } else if (s.type !== DEFAULT_STATE.type) {
+    q.type = s.type
+  }
+
   if (s.status) q.status = s.status
-  if (s.visibility) q.visibility = s.visibility
   if (s.hasLocation) q.hasLocation = s.hasLocation
   if (s.collectionId != null && s.collectionId > 0) q.collectionId = String(s.collectionId)
   if (s.orderBy !== DEFAULT_STATE.orderBy) q.orderBy = s.orderBy
@@ -105,17 +128,15 @@ function stateToQuery(s: VideoQueryState): Record<string, string> {
   if (s.pageSize !== DEFAULT_STATE.pageSize) q.pageSize = String(s.pageSize)
   if (s.viewMode !== DEFAULT_STATE.viewMode) q.view = s.viewMode
   if (s.density !== DEFAULT_STATE.density) q.density = s.density
-  if (!s.hoverPreview) q.preview = '0'
   return q
 }
 
-export function useVideoQuery() {
+export function useImageQuery() {
   const route = useRoute()
   const router = useRouter()
 
-  const state = ref<VideoQueryState>(parseInitialState(route.query as any))
+  const state = ref<ImageQueryState>(parseInitialState(route.query as any))
 
-  // keyword 单独走 debounce，避免输入时把 URL 更新成"每个按键一次 replace"
   let kwTimer: number | null = null
   const debouncedKeywordSync = () => {
     if (kwTimer) window.clearTimeout(kwTimer)
@@ -125,7 +146,7 @@ export function useVideoQuery() {
   }
 
   function syncToUrl() {
-    if (route.path !== '/manager/video') return
+    if (route.path !== '/manager/image') return
     const next = stateToQuery(state.value)
     const cur = route.query
     const sameKeys = Object.keys(next).length === Object.keys(cur).length
@@ -134,11 +155,10 @@ export function useVideoQuery() {
     router.replace({ path: route.path, query: next }).catch(() => { /* 忽略导航错误 */ })
   }
 
-  // 监听除 keyword 外字段，立即同步
   watch(
     () => [
+      state.value.type,
       state.value.status,
-      state.value.visibility,
       state.value.hasLocation,
       state.value.collectionId,
       state.value.orderBy,
@@ -147,27 +167,24 @@ export function useVideoQuery() {
       state.value.pageSize,
       state.value.viewMode,
       state.value.density,
-      state.value.hoverPreview,
     ],
     () => syncToUrl(),
     { deep: false }
   )
 
-  // keyword 单独 debounce
   watch(() => state.value.keyword, () => debouncedKeywordSync())
 
   // 浏览器后退 / 前进时（route.query 变了）回灌到 state
   watch(
     () => route.query,
     (q) => {
-      if (route.path !== '/manager/video') return
+      if (route.path !== '/manager/image') return
       const next = parseInitialState(q as any)
-      // 浅比较，避免互相触发
       const cur = state.value
       const isSame =
         cur.keyword === next.keyword &&
+        cur.type === next.type &&
         cur.status === next.status &&
-        cur.visibility === next.visibility &&
         cur.hasLocation === next.hasLocation &&
         cur.collectionId === next.collectionId &&
         cur.orderBy === next.orderBy &&
@@ -175,14 +192,13 @@ export function useVideoQuery() {
         cur.page === next.page &&
         cur.pageSize === next.pageSize &&
         cur.viewMode === next.viewMode &&
-        cur.density === next.density &&
-        cur.hoverPreview === next.hoverPreview
+        cur.density === next.density
       if (!isSame) state.value = next
     }
   )
 
-  /** 用户改筛选条件后通常想跳回第一页，避免出现"第 5 页但只有 3 页结果" */
-  function setFilter(patch: Partial<VideoQueryState>, resetPage = true) {
+  /** 用户改筛选条件后通常想跳回第一页 */
+  function setFilter(patch: Partial<ImageQueryState>, resetPage = true) {
     state.value = {
       ...state.value,
       ...patch,
@@ -194,8 +210,9 @@ export function useVideoQuery() {
     state.value = {
       ...state.value,
       keyword: '',
+      // 清除全部筛选 = 回归默认 photo（管理页核心场景），而不是 null（"全部"）
+      type: DEFAULT_STATE.type,
       status: null,
-      visibility: null,
       hasLocation: null,
       collectionId: null,
       page: 1,
@@ -204,10 +221,13 @@ export function useVideoQuery() {
 
   /** 列表里激活的"筛选 chip"列表，便于 UI 一行里显示并允许点 X 单独清除 */
   const activeChips = computed(() => {
-    const chips: { key: keyof VideoQueryState; label: string }[] = []
+    const chips: { key: keyof ImageQueryState; label: string }[] = []
     if (state.value.keyword) chips.push({ key: 'keyword', label: `搜索：${state.value.keyword}` })
+    // type=photo 是默认值不显示 chip；null（"全部"）和其它非默认值都要显示
+    if (state.value.type !== DEFAULT_STATE.type) {
+      chips.push({ key: 'type', label: `类型：${typeLabel(state.value.type)}` })
+    }
     if (state.value.status) chips.push({ key: 'status', label: `状态：${statusLabel(state.value.status)}` })
-    if (state.value.visibility) chips.push({ key: 'visibility', label: `可见性：${visibilityLabel(state.value.visibility)}` })
     if (state.value.hasLocation) {
       chips.push({ key: 'hasLocation', label: `位置：${state.value.hasLocation === 'yes' ? '有' : '无'}` })
     }
@@ -215,10 +235,11 @@ export function useVideoQuery() {
     return chips
   })
 
-  function clearChip(key: keyof VideoQueryState) {
+  function clearChip(key: keyof ImageQueryState) {
     if (key === 'keyword') setFilter({ keyword: '' })
+    // 单独清掉 type chip → 回归默认 'photo'，而不是 null
+    else if (key === 'type') setFilter({ type: DEFAULT_STATE.type })
     else if (key === 'status') setFilter({ status: null })
-    else if (key === 'visibility') setFilter({ visibility: null })
     else if (key === 'hasLocation') setFilter({ hasLocation: null })
     else if (key === 'collectionId') setFilter({ collectionId: null })
   }
@@ -237,18 +258,18 @@ function statusLabel(s: string): string {
     uploading: '上传中',
     pending: '待处理',
     processing: '处理中',
-    transcoding: '转码中',
-    ai_analyzing: 'AI 分析中',
     done: '已完成',
     failed: '失败',
-    ai_analyze_failed: 'AI 分析失败',
   }
   return map[s] ?? s
 }
 
-function visibilityLabel(v: string): string {
-  if (v === 'private') return '私密'
-  if (v === 'friends') return '好友可见'
-  if (v === 'public') return '公开'
-  return v
+function typeLabel(t: string | null): string {
+  if (t === null) return '全部'
+  const map: Record<string, string> = {
+    photo: '照片',
+    cover: '封面',
+    other: '其他',
+  }
+  return map[t] ?? t
 }

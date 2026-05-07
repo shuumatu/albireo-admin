@@ -15,6 +15,11 @@ export interface VideoListParams {
   status?: string;
   /** 后端按 visibility 精确匹配 */
   visibility?: string;
+  /**
+   * 位置过滤：'yes' = 仅有位置；'no' = 仅无位置；undefined = 不过滤。
+   * 与 ImageParams.hasLocation 同形态。
+   */
+  hasLocation?: 'yes' | 'no';
   /** 排序字段，默认 createdAt */
   orderBy?: VideoListOrderBy;
   /** 排序方向，默认 desc */
@@ -74,6 +79,8 @@ export interface VideoItem {
   height?: number | null
   /** 文件字节数。null = 未抽到。 */
   fileSize?: number | null
+  /** 是否拥有 PostGIS geom。后端按 (geom IS NOT NULL) 计算。 */
+  hasLocation?: boolean | null
 }
 
 export interface VideoListResponse {

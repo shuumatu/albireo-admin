@@ -147,7 +147,8 @@ onMounted(() => {
         }
       ]
     },
-    center: [139.7, 35.6],
+    // 默认中心广州（广东省会，WGS-84），与公共站 Map.vue 与 LocationPicker 保持一致
+    center: [113.2644, 23.1291],
     zoom: 5
   })
 
