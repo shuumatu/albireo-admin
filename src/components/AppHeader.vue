@@ -107,6 +107,10 @@ const menuOptions = [
       {
         label: '模型切换',
         key: '/manager/vision-model'
+      },
+      {
+        label: '向量嵌入',
+        key: '/manager/embedding'
       }
     ]
   }

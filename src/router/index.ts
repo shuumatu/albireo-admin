@@ -14,6 +14,7 @@ import LoginPage from '../views/LoginPage.vue'
 import UserProfile from '../views/UserProfile.vue'
 import TaskProgress from '../views/TaskProgress.vue'
 import VisionModelManager from '../views/VisionModelManager.vue'
+import EmbeddingManager from '../views/EmbeddingManager.vue'
 
 const routes = [
     {
@@ -90,6 +91,12 @@ const routes = [
         name: 'visionModelManager',
         meta: { title: '视觉模型管理' },
         component: VisionModelManager
+    },
+    {
+        path: '/manager/embedding',
+        name: 'embeddingManager',
+        meta: { title: '向量嵌入' },
+        component: EmbeddingManager
     },
     {
         path: '/map',
