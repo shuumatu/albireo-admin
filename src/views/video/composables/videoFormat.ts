@@ -174,17 +174,15 @@ export function get480pStreamUrl(objectKey: string | null | undefined, cdnOrigin
 }
 
 /**
- * 封面帧选择器的级联候选：720p（画质 + 速度平衡）→ 480p（兜底）→ 原画（最后兜底，画质最好但慢）。
- * 转码尚未完成的视频可能只有原画，链表能优雅降级。
+ * 封面帧选择器的级联候选：优先使用已确认完成的转码档（720p > 480p > 1080p），
+ * 最后兜底原画（画质最好但慢）。转码尚未完成的视频可能只有原画，链表能优雅降级。
  */
 export function getCoverPickerCandidates(
   objectKey: string | null | undefined,
   cdnOrigin: string
 ): string[] {
   if (!objectKey || !cdnOrigin) return []
-  return [
-    getStreamUrl(objectKey, cdnOrigin, '720p'),
-    getStreamUrl(objectKey, cdnOrigin, '480p'),
-    getStreamUrl(objectKey, cdnOrigin, 'original'),
-  ].filter(Boolean)
+  const PREFERRED_ORDER: VideoQuality[] = ['720p', '480p', '1080p']
+  const transcoded = PREFERRED_ORDER.map((q) => getStreamUrl(objectKey, cdnOrigin, q))
+  return [...transcoded, getStreamUrl(objectKey, cdnOrigin, 'original')].filter(Boolean)
 }

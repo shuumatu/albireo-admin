@@ -865,8 +865,11 @@ export function useUploadQueue() {
 
     const multipartProgressThrottle = { last: 0 }
 
-    // 任务内并发上限 = min(2, 全局槽数)，每个 part-upload 仍走全局 semaphore
-    const innerConcurrency = Math.min(2, store.concurrency)
+    // 任务内并发上限 = min(6, 全局槽数)。
+    // 6 是基于「浏览器 HTTP/1.1 同源 6 连接 + R2 走 HTTP/2 时复用」的折中：
+    // 对单大文件而言，2 太低（很容易跑不满出口带宽），>6 又会和其它任务/接口竞争连接。
+    // 每个 part-upload 仍走全局 semaphore 做总量限制。
+    const innerConcurrency = Math.max(1, Math.min(6, store.concurrency))
     let cursor = 0
     let uploadError: any = null
 

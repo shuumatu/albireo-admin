@@ -64,7 +64,7 @@ export const useUploadStore = defineStore(
   'upload',
   () => {
     const tasks = ref<UploadTask[]>([])
-    const concurrency = ref(4) // 全局分片并发槽
+    const concurrency = ref(8) // 全局分片并发槽
     const filter = ref<FilterStatus>('all')
     const sortKey = ref<SortKey>('createdAt')
     const sortAsc = ref(false)

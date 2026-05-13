@@ -288,9 +288,10 @@ const collectionOptions = computed(() =>
 const locationModel = ref<{ lat: number; lng: number } | null>(null)
 
 /**
- * 封面帧选择器的视频源候选列表（按推荐顺序）：720p → 480p → 原画。
- * 用 720p 而非原画：原画动辄 200MB 以上拉满带宽抓帧很慢，720p 已经够覆盖大多数封面用例。
- * 让 picker 内部按 onerror 顺次降级，转码未完成的视频也能用最后的原画。
+ * 封面帧选择器的视频源候选列表（按推荐顺序）：720p → 480p → 1080p → 原画。
+ * 转码档位的「成功 / 缺失」管理统一搬到「重新处理」管理页，这里不再实时拉档位列表，
+ * 候选列表按"全部档都尝试一遍" + 原画兜底——浏览器 video element 会顺序回退到首个
+ * 加载成功的源，画质不存在时只多 1-2 秒 onerror 开销，可接受。
  */
 const streamCandidates = computed(() =>
   props.video?.objectKey

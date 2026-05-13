@@ -46,13 +46,15 @@ import { getVisionModel, switchVisionModel } from '../api/visionModel'
 const message = useMessage()
 
 const modelLabels: Record<string, string> = {
-  zhipu: '智谱 AI (glm-4.6v-flash)',
+  zhipu: '智谱 AI (glm-4.6v-flash, 免费)',
+  'zhipu-flashx': '智谱 AI (glm-4.6v-flashx, 付费)',
   gemini: 'Google Gemini 3 Flash Preview',
   twelvelabs: 'Twelve Labs'
 }
 
 const modelOptions = [
-  { label: '智谱 AI', value: 'zhipu' },
+  { label: '智谱 Flash (免费, 限流严重)', value: 'zhipu' },
+  { label: '智谱 FlashX (付费, 限流宽松)', value: 'zhipu-flashx' },
   { label: 'Google Gemini', value: 'gemini' },
   { label: 'Twelve Labs', value: 'twelvelabs' }
 ]

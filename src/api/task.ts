@@ -12,6 +12,11 @@ export interface TaskProgressVO {
    * UI 自动绕过为不确定动画。
    */
   progress?: number | null;
+  /**
+   * 各清晰度子进度（"1080p" -> 0..100）。仅视频转码时由后端 worker 上报；
+   * 不存在 / 还没开始时为 null/undefined。前端用它在卡片上展示「当前哪一档在转」。
+   */
+  qualityProgress?: Record<string, number> | null;
 }
 
 export function fetchProcessingTasks(): Promise<TaskProgressVO[]> {

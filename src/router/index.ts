@@ -15,6 +15,7 @@ import UserProfile from '../views/UserProfile.vue'
 import TaskProgress from '../views/TaskProgress.vue'
 import VisionModelManager from '../views/VisionModelManager.vue'
 import EmbeddingManager from '../views/EmbeddingManager.vue'
+import ReprocessManager from '../views/ReprocessManager.vue'
 
 const routes = [
     {
@@ -97,6 +98,12 @@ const routes = [
         name: 'embeddingManager',
         meta: { title: '向量嵌入' },
         component: EmbeddingManager
+    },
+    {
+        path: '/manager/reprocess',
+        name: 'reprocess',
+        meta: { title: '重新处理' },
+        component: ReprocessManager
     },
     {
         path: '/map',

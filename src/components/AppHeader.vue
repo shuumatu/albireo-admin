@@ -111,6 +111,10 @@ const menuOptions = [
       {
         label: '向量嵌入',
         key: '/manager/embedding'
+      },
+      {
+        label: '重新处理',
+        key: '/manager/reprocess'
       }
     ]
   }
