@@ -107,12 +107,24 @@ export function fetchVideoList(params: VideoListParams ) {
   return request.get<VideoListResponse>('/video/get-videos', { params })
 }
 
-export function fetchCollectionsIds(): Promise<CollectionItem[]> {
-  return request.get('/collection/video/list')
+/**
+ * 后端 /collection/video/list 走的是统一 Result<T> 包装：{ code, message, data }。
+ * 这里把 data 拆出来，让调用方拿到的就是 CollectionItem[]，
+ * 否则 ImageListPage / VideoListPage 里的 (list as any[]).map(...) 会因为
+ * 拿到的是 {code,message,data} 对象而抛错，最终表现为「加入合集」下拉无数据。
+ */
+export async function fetchCollectionsIds(): Promise<CollectionItem[]> {
+  const res = await request.get<any>('/collection/video/list')
+  if (Array.isArray(res)) return res as CollectionItem[]
+  if (res && Array.isArray((res as any).data)) return (res as any).data as CollectionItem[]
+  return []
 }
 
-export function fetchImageCollectionsIds(): Promise<CollectionItem[]> {
-  return request.get('/collection/image/list')
+export async function fetchImageCollectionsIds(): Promise<CollectionItem[]> {
+  const res = await request.get<any>('/collection/image/list')
+  if (Array.isArray(res)) return res as CollectionItem[]
+  if (res && Array.isArray((res as any).data)) return (res as any).data as CollectionItem[]
+  return []
 }
 
 export function addVideosToCollections(params: CollectionsParams ) {

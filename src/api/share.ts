@@ -13,6 +13,11 @@ export interface ShareCreateDTO {
   maxViews?: number
 }
 
+/**
+ * 分享更新参数。普通字段传 string/number 表示更新；不传（undefined）表示保持现状；
+ * `clearXxx=true` 哨兵用来把对应列改回 NULL（解决"清空过期 / 次数 / 密码"）。
+ * 当 clear 与对应字段同时存在时，clear 优先。
+ */
 export interface ShareUpdateDTO {
   title?: string
   description?: string
@@ -20,6 +25,8 @@ export interface ShareUpdateDTO {
   expiresAt?: string
   maxViews?: number
   clearPassword?: boolean
+  clearExpiresAt?: boolean
+  clearMaxViews?: boolean
 }
 
 export interface ShareVO {
@@ -75,6 +82,13 @@ export function updateShare(id: number, payload: ShareUpdateDTO): Promise<ShareV
   return request.put(`/share/${id}`, payload)
 }
 
+/**
+ * 启用 / 停用分享。expired 由系统判定，不能从 UI 设置。
+ */
+export function updateShareStatus(id: number, status: 'active' | 'disabled'): Promise<ShareVO> {
+  return request.patch(`/share/${id}/status`, { status })
+}
+
 export function deleteShare(id: number): Promise<void> {
   return request.delete(`/share/${id}`)
 }
@@ -83,6 +97,10 @@ export function getShareStats(id: number): Promise<ShareStatsVO> {
   return request.get(`/share/${id}/stats`)
 }
 
+/**
+ * 二维码图片 URL（公开端点，可直接当 &lt;img src&gt; 用）。
+ * 加 cache-buster 防止编辑分享后旧 QR 被浏览器缓存复用。
+ */
 export function getShareQRCodeUrl(shareCode: string, size = 300): string {
-  return `/api/metadata/share/access/${shareCode}/qrcode?size=${size}`
+  return `/api/metadata/share/access/${shareCode}/qrcode?size=${size}&t=${Date.now()}`
 }

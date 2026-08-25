@@ -165,8 +165,15 @@
       :has-next="drawerHasNext"
       @navigate="onDrawerNavigate"
       @delete="onDrawerDelete"
+      @share="(img: ImageItem) => openShareDialog(img)"
       @patched="onDrawerPatched"
       @collections-changed="onDrawerCollectionsChanged"
+    />
+
+    <!-- 分享对话框（卡片菜单 / 列表菜单 / 抽屉头部任一入口触发都汇聚到这里） -->
+    <ShareDialog
+      v-model:show="shareDialogShow"
+      :target="shareTarget"
     />
   </div>
 </template>
@@ -191,6 +198,8 @@ import ImageCard from './ImageCard.vue'
 import ImageListRow from './ImageListRow.vue'
 import ImageFloatingActionBar from './ImageFloatingActionBar.vue'
 import ImageEditDrawer from './ImageEditDrawer.vue'
+import ShareDialog from '../../components/share/ShareDialog.vue'
+import { toMediumUrl } from './composables/imageFormat'
 import { useImageQuery } from './composables/useImageQuery'
 import { useImageSelection } from './composables/useImageSelection'
 // 公共站 origin 算法与视频侧共用，跨页面体验一致；图片详情路径是 /image/{uuid}
@@ -430,10 +439,27 @@ function onCardMenu(image: ImageItem, action: string) {
     case 'retry':
       onRetry(image)
       break
+    case 'share':
+      openShareDialog(image)
+      break
     case 'delete':
       confirmDeleteOne(image)
       break
   }
+}
+
+// ---------- 分享 ----------
+const shareDialogShow = ref(false)
+const shareTarget = ref<{ targetType: 'image'; targetId: number; name: string; coverUrl: string | null } | null>(null)
+
+function openShareDialog(image: ImageItem) {
+  shareTarget.value = {
+    targetType: 'image',
+    targetId: image.id,
+    name: image.title || image.fileName || `图片 #${image.id}`,
+    coverUrl: image.imageUrl ? toMediumUrl(image.imageUrl) : null,
+  }
+  shareDialogShow.value = true
 }
 
 async function confirmDeleteOne(image: ImageItem) {
@@ -637,8 +663,20 @@ onMounted(() => {
   if (route.path === '/manager/image' && collectionDetailStore.img) {
     collectionDetailStore.img = null
   }
+  /*
+    嵌入在 CollectionDetail 内时，默认 type='photo' 会把合集里的 cover/other
+    类型图片全部过滤掉，呈现"刚加进来的图却看不到"的困惑。
+    所以这里把 type 重置为 null（"全部类型"），让合集内容完整可见；
+    用户依然可以在筛选条里手动改回 photo。
+    注意：setFilter 会触发 state 的 watcher 自动 loadImageList，
+    因此分支内不再重复调用 loadImageList()，避免双发请求。
+  */
   loadCollections()
-  loadImageList()
+  if (isInCollectionView.value && state.value.type === 'photo') {
+    query.setFilter({ type: null }, false)
+  } else {
+    loadImageList()
+  }
   window.addEventListener('keydown', onGlobalKey)
 })
 onBeforeUnmount(() => {

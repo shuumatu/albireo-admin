@@ -23,6 +23,13 @@ interface Runtime {
   cancelled: boolean
   /** 滑动窗口速度采样（最多保留 5 秒） */
   speedSamples: { ts: number; bytes: number }[]
+  /**
+   * 上一次写入 store 时的 displayedUploaded（含 inFlight）。
+   * 速度采样以 displayedUploaded 的瞬时差分为信号源，避免「只在分片完成时一次性 push partSize」
+   * 造成的『传输期间显示为 0、完成瞬间尖峰』问题；续传场景下需要初始化为已上传字节数，
+   * 以免历史进度被当作新增字节误算入速度。
+   */
+  lastDisplayedUploaded: number
   /** 已上传字节计数（运行时） */
   uploadedBytes: number
   /** 总字节数 */
@@ -39,6 +46,12 @@ interface Runtime {
   partSize?: number
   fileHash?: string
 }
+
+/**
+ * 速度计算最小窗口（秒）：避免单样本被极短时间除成虚高（如 5MB/0.05s = 100MB/s 的尖峰）。
+ * 0.5s 是「响应性」与「稳定性」的折中。
+ */
+const MIN_SPEED_WINDOW_SEC = 0.5
 
 /** 模块级运行时 Map，保证 composable 多次调用共享实例 */
 const runtimeMap = new Map<string, Runtime>()
@@ -393,6 +406,7 @@ export function useUploadQueue() {
         paused: false,
         cancelled: false,
         speedSamples: [],
+        lastDisplayedUploaded: 0,
         uploadedBytes: 0,
         totalBytes: file.size,
         uploadedParts: [],
@@ -427,6 +441,7 @@ export function useUploadQueue() {
       paused: false,
       cancelled: false,
       speedSamples: [],
+      lastDisplayedUploaded: 0,
       uploadedBytes: 0,
       totalBytes: file.size,
       uploadedParts: [],
@@ -483,6 +498,7 @@ export function useUploadQueue() {
     if (!rt) return
     rt.paused = false
     rt.speedSamples = []
+    rt.lastDisplayedUploaded = 0
     store.updateTask(id, {
       status: 'queued',
       errorMessage: undefined,
@@ -574,6 +590,11 @@ export function useUploadQueue() {
   /**
    * rt.uploadedBytes = 服务端已确认的已传字节（分片整块完成才累加）；
    * partUploadLoaded = 尚在飞行中的各分片已发送字节。展示层两者相加。
+   *
+   * 速度采样基于「displayedUploaded」的瞬时差分（含 inFlight）：
+   * - 分片传输期间 onUploadProgress 持续把 inFlight 推高 → 持续产生小 delta 进入采样
+   * - 分片完成时 inFlight 减 partSize、uploadedBytes 加 partSize，displayedUploaded 不变，
+   *   不会重复 push 一次 partSize 进采样，避免「完成瞬间速度尖峰」
    */
   function flushUploadTelemetry(
     id: string,
@@ -586,17 +607,21 @@ export function useUploadQueue() {
     const now = Date.now()
     if (deltaCommittedBytes !== 0) {
       rt.uploadedBytes += deltaCommittedBytes
-      if (deltaCommittedBytes > 0) {
-        rt.speedSamples.push({ ts: now, bytes: deltaCommittedBytes })
-        const cutoff = now - 5000
-        while (rt.speedSamples.length > 0 && rt.speedSamples[0].ts < cutoff) {
-          rt.speedSamples.shift()
-        }
-      }
     }
 
     const inFlightSum = [...rt.partUploadLoaded.values()].reduce((a, b) => a + b, 0)
     const displayedUploaded = Math.min(rt.uploadedBytes + inFlightSum, rt.totalBytes)
+
+    const sampleDelta = displayedUploaded - rt.lastDisplayedUploaded
+    if (sampleDelta > 0) {
+      rt.speedSamples.push({ ts: now, bytes: sampleDelta })
+      rt.lastDisplayedUploaded = displayedUploaded
+      const cutoff = now - 5000
+      while (rt.speedSamples.length > 0 && rt.speedSamples[0].ts < cutoff) {
+        rt.speedSamples.shift()
+      }
+    }
+
     const nearEnd = displayedUploaded >= rt.totalBytes - 2
     if (
       multipartThrottle &&
@@ -607,12 +632,13 @@ export function useUploadQueue() {
     }
     if (multipartThrottle) multipartThrottle.last = now
 
-    const totalDelta = rt.speedSamples.reduce((a, b) => a + b.bytes, 0)
-    const span =
-      rt.speedSamples.length > 0
-        ? Math.max((now - rt.speedSamples[0].ts) / 1000, 0.05)
-        : 0.05
-    const speed = totalDelta / span
+    let speed = 0
+    if (rt.speedSamples.length > 0) {
+      const totalDelta = rt.speedSamples.reduce((a, b) => a + b.bytes, 0)
+      const oldest = rt.speedSamples[0].ts
+      const windowSpan = Math.max((now - oldest) / 1000, MIN_SPEED_WINDOW_SEC)
+      speed = totalDelta / windowSpan
+    }
     const remaining = rt.totalBytes - displayedUploaded
     const eta = speed > 0 ? remaining / speed : null
     const progress = Math.min(
@@ -797,8 +823,8 @@ export function useUploadQueue() {
           const totalDelta = rt.speedSamples.reduce((a, b) => a + b.bytes, 0)
           const span =
             rt.speedSamples.length > 0
-              ? Math.max((now - rt.speedSamples[0].ts) / 1000, 0.05)
-              : 0.05
+              ? Math.max((now - rt.speedSamples[0].ts) / 1000, MIN_SPEED_WINDOW_SEC)
+              : MIN_SPEED_WINDOW_SEC
           const speed = totalDelta / span
           const remaining = rt.totalBytes - clamped
           const eta = speed > 0 ? remaining / speed : null
@@ -858,6 +884,8 @@ export function useUploadQueue() {
     const uploadedFromServer = listed.parts.length * rt.partSize
     rt.uploadedBytes = Math.min(uploadedFromServer, rt.totalBytes)
     rt.partUploadLoaded.clear()
+    // 把基准点对齐到续传起点，避免历史进度被当作「瞬时增量」误算入速度
+    rt.lastDisplayedUploaded = rt.uploadedBytes
 
     flushUploadTelemetry(id, 0, undefined)
 
@@ -994,6 +1022,7 @@ export function useUploadQueue() {
       paused: false,
       cancelled: false,
       speedSamples: [],
+      lastDisplayedUploaded: 0,
       uploadedBytes: 0,
       totalBytes: file.size,
       uploadedParts: [],

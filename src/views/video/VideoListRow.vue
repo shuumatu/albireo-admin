@@ -165,17 +165,24 @@ const overlayStatus = computed(() => {
   return s
 })
 
-const menuOptions = computed(() => [
-  { label: '编辑', key: 'edit' },
-  { label: '在新标签页打开', key: 'open-public' },
-  { label: '设置封面帧', key: 'set-cover' },
-  { label: '复制对象 Key', key: 'copy-key' },
-  { type: 'divider', key: 'd1' },
-  {
+const menuOptions = computed(() => {
+  const opts: any[] = [
+    { label: '编辑', key: 'edit' },
+    { label: '在新标签页打开', key: 'open-public' },
+    { label: '设置封面帧', key: 'set-cover' },
+    { label: '复制对象 Key', key: 'copy-key' },
+  ]
+  // 仅 done 视频可分享，与 VideoCard / ImageListRow 一致
+  if (!overlayStatus.value) {
+    opts.push({ label: '分享', key: 'share' })
+  }
+  opts.push({ type: 'divider', key: 'd1' })
+  opts.push({
     label: () => h('span', { style: { color: 'var(--n-error-color, #d03050)' } }, '删除'),
     key: 'delete',
-  },
-])
+  })
+  return opts
+})
 
 function onRowClick(ev: MouseEvent) {
   emit('click', props.video, ev)

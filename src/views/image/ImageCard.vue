@@ -190,6 +190,10 @@ const menuOptions = computed(() => {
     opts.push({ label: '位置信息', key: 'location' })
     opts.push({ label: 'EXIF 信息', key: 'exif' })
     opts.push({ label: '评论', key: 'comment' })
+    // 仅 done 状态可分享：处理失败 / 处理中的图分享出去对方看不到内容
+    if (!s || s === 'done') {
+      opts.push({ label: '分享', key: 'share' })
+    }
   }
   if (s === 'failed' || s === 'process_failed') {
     opts.push({ label: '重试', key: 'retry' })

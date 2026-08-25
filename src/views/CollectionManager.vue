@@ -96,6 +96,14 @@
               >
                 查看详情
               </n-button>
+              <n-button
+                size="small"
+                type="primary"
+                class="overlay-btn"
+                @click.stop="openShareDialog(item)"
+              >
+                分享
+              </n-button>
               <n-popconfirm
                 @positive-click="handleDelete(item.id)"
                 negative-text="取消"
@@ -178,6 +186,12 @@
       </n-flex>
     </template>
   </n-modal>
+
+  <!-- 分享对话框 -->
+  <ShareDialog
+    v-model:show="shareDialogShow"
+    :target="shareTarget"
+  />
 </template>
 
 <script setup lang="ts">
@@ -194,10 +208,25 @@ import {
   FolderOpen24Regular,
 } from '@vicons/fluent'
 import { useCollectionDetailStore } from '../stores/collection'
+import ShareDialog from '../components/share/ShareDialog.vue'
 
 const collectionDetailStore = useCollectionDetailStore()
 const message = useMessage()
 const router = useRouter()
+
+// ---------- 分享 ----------
+const shareDialogShow = ref(false)
+const shareTarget = ref<{ targetType: 'collection'; targetId: number; name: string; coverUrl: string | null } | null>(null)
+
+function openShareDialog(item: any) {
+  shareTarget.value = {
+    targetType: 'collection',
+    targetId: item.id,
+    name: item.name || `合集 #${item.id}`,
+    coverUrl: item.coverUrl || null,
+  }
+  shareDialogShow.value = true
+}
 
 const searchKeyword = ref('')
 const collections = ref<any[]>([])

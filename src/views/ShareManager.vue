@@ -1,198 +1,118 @@
 <template>
-  <div class="p-8">
-    <n-card class="max-w-6xl mx-auto">
-      <n-tabs v-model:value="activeTab" type="line" animated>
-        <!-- ==================== 创建分享 Tab ==================== -->
-        <n-tab-pane name="create" tab="创建分享">
-          <n-tabs v-model:value="mediaType" type="segment" style="margin-bottom: 16px;">
-            <n-tab-pane name="video" tab="视频" />
-            <n-tab-pane name="image" tab="图片" />
-            <n-tab-pane name="collection" tab="合集" />
-          </n-tabs>
-
-          <n-spin :show="mediaLoading">
-            <!-- 视频网格 -->
-            <n-grid v-if="mediaType === 'video'" cols="4" x-gap="16" y-gap="16">
-              <n-grid-item v-for="item in videoItems" :key="item.id">
-                <n-card size="small" hoverable class="media-card" @click="openShareDialog('video', item.id, item.title || item.fileName, item.coverUrl)">
-                  <template #cover>
-                    <div class="cover-wrapper">
-                      <img v-if="item.coverUrl" :src="item.coverUrl" class="cover-image" />
-                      <div v-else class="cover-placeholder">
-                        <n-icon :component="VideocamOutline" size="48" color="#aaa" />
-                      </div>
-                      <div class="media-overlay">
-                        <n-button type="primary" size="small" ghost>
-                          <template #icon><n-icon :component="ShareSocialOutline" /></template>
-                          分享
-                        </n-button>
-                      </div>
-                    </div>
-                  </template>
-                  <n-ellipsis :line-clamp="1" :tooltip="{ width: 240 }">
-                    {{ item.title || item.fileName }}
-                  </n-ellipsis>
-                </n-card>
-              </n-grid-item>
-            </n-grid>
-
-            <!-- 图片网格 -->
-            <n-grid v-if="mediaType === 'image'" cols="4" x-gap="16" y-gap="16">
-              <n-grid-item v-for="item in imageItems" :key="item.id">
-                <n-card size="small" hoverable class="media-card" @click="openShareDialog('image', item.id, item.title || item.fileName, toMediumUrl(item.imageUrl))">
-                  <template #cover>
-                    <div class="cover-wrapper">
-                      <img :src="toMediumUrl(item.imageUrl)" class="cover-image" />
-                      <div class="media-overlay">
-                        <n-button type="primary" size="small" ghost>
-                          <template #icon><n-icon :component="ShareSocialOutline" /></template>
-                          分享
-                        </n-button>
-                      </div>
-                    </div>
-                  </template>
-                  <n-ellipsis :line-clamp="1" :tooltip="{ width: 240 }">
-                    {{ item.title || item.fileName }}
-                  </n-ellipsis>
-                </n-card>
-              </n-grid-item>
-            </n-grid>
-
-            <!-- 合集网格 -->
-            <n-grid v-if="mediaType === 'collection'" cols="4" x-gap="16" y-gap="16">
-              <n-grid-item v-for="item in collectionItems" :key="item.id">
-                <n-card size="small" hoverable class="media-card" @click="openShareDialog('collection', item.id, item.name, item.coverUrl)">
-                  <template #cover>
-                    <div class="cover-wrapper">
-                      <img v-if="item.coverUrl" :src="item.coverUrl" class="cover-image" />
-                      <div v-else class="cover-placeholder">
-                        <n-icon :component="AlbumsOutline" size="48" color="#aaa" />
-                      </div>
-                      <div class="media-overlay">
-                        <n-button type="primary" size="small" ghost>
-                          <template #icon><n-icon :component="ShareSocialOutline" /></template>
-                          分享
-                        </n-button>
-                      </div>
-                    </div>
-                  </template>
-                  <n-ellipsis :line-clamp="1" :tooltip="{ width: 240 }">
-                    {{ item.name }}
-                  </n-ellipsis>
-                  <template #footer>
-                    <span class="text-gray-400 text-xs">{{ item.description || '暂无描述' }}</span>
-                  </template>
-                </n-card>
-              </n-grid-item>
-            </n-grid>
-
-            <n-empty v-if="!mediaLoading && currentMediaEmpty" description="暂无内容" style="margin: 40px 0;" />
-          </n-spin>
-
-          <n-flex justify="flex-end" style="margin-top: 16px;">
-            <n-pagination
-              v-model:page="mediaPage"
-              v-model:page-size="mediaPageSize"
-              :item-count="mediaTotalCount"
-              show-size-picker
-              :page-sizes="[12, 24, 48]"
-              @update:page="fetchMediaData"
-              @update:page-size="handleMediaPageSizeChange"
-            />
-          </n-flex>
-        </n-tab-pane>
-
-        <!-- ==================== 我的分享 Tab ==================== -->
-        <n-tab-pane name="manage" tab="我的分享">
-          <div class="function-area">
-            <n-flex align="center">
-              <n-select
-                v-model:value="filterType"
-                :options="targetTypeFilterOptions"
-                placeholder="按类型筛选"
-                style="width: 140px"
-                clearable
-              />
-              <n-button type="primary" @click="fetchShares">刷新</n-button>
-            </n-flex>
+  <div class="share-manager-page">
+    <n-card class="page-card">
+      <!-- 顶部说明 + 跳转按钮 -->
+      <template #header>
+        <div class="header">
+          <div class="header-left">
+            <h2 class="page-title">我的分享</h2>
+            <p class="page-subtitle">
+              管理你已创建的分享链接。要新建分享，请到
+              <n-button text type="primary" @click="goImage">图片</n-button>
+              /
+              <n-button text type="primary" @click="goVideo">视频</n-button>
+              /
+              <n-button text type="primary" @click="goCollection">合集</n-button>
+              页面，在卡片或详情上点击"分享"。
+            </p>
           </div>
+          <n-button @click="fetchShares" :loading="loading">
+            <template #icon><n-icon :component="RefreshOutline" /></template>
+            刷新
+          </n-button>
+        </div>
+      </template>
 
-          <n-data-table
-            :columns="columns"
-            :data="displayShares"
-            :loading="shareLoading"
-            :pagination="sharePagination"
-            @update:page="handleSharePageChange"
-            @update:page-size="handleSharePageSizeChange"
-          />
-        </n-tab-pane>
-      </n-tabs>
+      <!-- 筛选栏 -->
+      <n-flex align="center" :wrap="true" class="filter-bar">
+        <n-input
+          v-model:value="keyword"
+          placeholder="搜索标题 / 描述"
+          style="width: 240px"
+          clearable
+          @keyup.enter="onFilterChange"
+          @clear="onFilterChange"
+        >
+          <template #prefix><n-icon :component="SearchOutline" /></template>
+        </n-input>
+        <n-select
+          v-model:value="filterType"
+          :options="targetTypeFilterOptions"
+          placeholder="全部类型"
+          style="width: 120px"
+          clearable
+          @update:value="onFilterChange"
+        />
+        <n-select
+          v-model:value="filterStatus"
+          :options="statusFilterOptions"
+          placeholder="全部状态"
+          style="width: 120px"
+          clearable
+          @update:value="onFilterChange"
+        />
+        <span style="flex: 1 1 auto;" />
+        <n-text depth="3" v-if="!loading">
+          共 {{ totalRaw }} 条 · 当前显示 {{ filteredCount }} 条
+        </n-text>
+      </n-flex>
+
+      <n-data-table
+        :columns="columns"
+        :data="displayShares"
+        :loading="loading"
+        :pagination="pagination"
+        :remote="true"
+        @update:page="handlePageChange"
+        @update:page-size="handlePageSizeChange"
+        :row-key="(row: ShareVO) => row.id"
+      />
     </n-card>
 
-    <!-- ==================== 创建分享弹窗 ==================== -->
-    <n-modal v-model:show="showCreateModal" preset="card" style="width: 520px;" :title="createDialogTitle">
-      <div class="share-preview">
-        <img v-if="selectedMedia.coverUrl" :src="selectedMedia.coverUrl" class="preview-thumb" />
-        <div v-else class="preview-placeholder">
-          <n-icon :component="selectedMedia.targetType === 'video' ? VideocamOutline : selectedMedia.targetType === 'image' ? ImageOutline : AlbumsOutline" size="40" color="#999" />
-        </div>
-        <div class="preview-info">
-          <div class="preview-title">{{ selectedMedia.name }}</div>
-          <n-tag :type="targetTagType(selectedMedia.targetType)" size="small" :bordered="false">
-            {{ formatTargetType(selectedMedia.targetType) }}
-          </n-tag>
-        </div>
-      </div>
-      <n-divider style="margin: 12px 0;" />
-      <n-form :model="createForm" label-width="100" label-placement="left">
-        <n-form-item label="自定义标题">
-          <n-input v-model:value="createForm.title" placeholder="留空使用原资源标题" />
-        </n-form-item>
-        <n-form-item label="描述">
-          <n-input v-model:value="createForm.description" type="textarea" placeholder="可选描述" :rows="2" />
-        </n-form-item>
-        <n-form-item label="访问密码">
-          <n-input v-model:value="createForm.password" type="password" show-password-on="click" placeholder="留空则无密码保护" />
-        </n-form-item>
-        <n-form-item label="过期时间">
-          <n-date-picker v-model:value="createExpireTs" type="datetime" clearable style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="最大访问次数">
-          <n-input-number v-model:value="createForm.maxViews" placeholder="留空不限制" style="width: 100%" :min="1" :show-button="false" />
-        </n-form-item>
-      </n-form>
-      <template #action>
-        <n-space>
-          <n-button @click="showCreateModal = false">取消</n-button>
-          <n-button type="primary" @click="handleCreate" :loading="submitting">创建分享</n-button>
-        </n-space>
-      </template>
-    </n-modal>
-
     <!-- ==================== 编辑分享弹窗 ==================== -->
-    <n-modal v-model:show="showEditModal" title="编辑分享" preset="card" style="width: 520px;">
-      <n-form :model="editForm" label-width="100" label-placement="left">
+    <n-modal v-model:show="showEditModal" title="编辑分享" preset="card" style="width: 540px;">
+      <n-form :model="editForm" label-width="120" label-placement="left">
         <n-form-item label="标题">
-          <n-input v-model:value="editForm.title" placeholder="分享标题" />
+          <n-input v-model:value="editForm.title" placeholder="留空使用原资源标题" maxlength="80" show-count clearable />
         </n-form-item>
         <n-form-item label="描述">
-          <n-input v-model:value="editForm.description" type="textarea" placeholder="描述" :rows="2" />
+          <n-input v-model:value="editForm.description" type="textarea" placeholder="可选描述" :rows="2" maxlength="200" show-count />
         </n-form-item>
         <n-form-item label="新密码">
-          <n-input v-model:value="editForm.password" type="password" show-password-on="click" placeholder="留空不修改" />
+          <n-input v-model:value="editForm.password" type="password" show-password-on="click" placeholder="留空不修改" :disabled="editForm.clearPassword" />
         </n-form-item>
         <n-form-item label="清除密码">
           <n-switch v-model:value="editForm.clearPassword" />
+          <n-text depth="3" style="margin-left: 12px; font-size: 12px;">开启后将移除密码保护</n-text>
         </n-form-item>
         <n-form-item label="过期时间">
-          <n-date-picker v-model:value="editExpireTs" type="datetime" clearable style="width: 100%" />
+          <n-flex align="center" style="width: 100%;">
+            <n-date-picker
+              v-model:value="editExpireTs"
+              type="datetime"
+              clearable
+              style="flex: 1 1 auto;"
+              :disabled="editForm.clearExpiresAt"
+            />
+            <n-checkbox v-model:checked="editForm.clearExpiresAt">设为永久</n-checkbox>
+          </n-flex>
         </n-form-item>
         <n-form-item label="最大访问次数">
-          <n-input-number v-model:value="editForm.maxViews" placeholder="不限制" style="width: 100%" :min="1" :show-button="false" />
+          <n-flex align="center" style="width: 100%;">
+            <n-input-number
+              v-model:value="editForm.maxViews"
+              placeholder="不限制"
+              style="flex: 1 1 auto;"
+              :min="1"
+              :show-button="false"
+              :disabled="editForm.clearMaxViews"
+            />
+            <n-checkbox v-model:checked="editForm.clearMaxViews">不限制</n-checkbox>
+          </n-flex>
         </n-form-item>
       </n-form>
       <template #action>
-        <n-space>
+        <n-space justify="end">
           <n-button @click="showEditModal = false">取消</n-button>
           <n-button type="primary" @click="handleUpdate" :loading="submitting">保存</n-button>
         </n-space>
@@ -200,7 +120,7 @@
     </n-modal>
 
     <!-- ==================== 统计弹窗 ==================== -->
-    <n-modal v-model:show="showStatsModal" title="访问统计" preset="card" style="width: 680px;">
+    <n-modal v-model:show="showStatsModal" title="访问统计" preset="card" style="width: 720px;">
       <n-spin :show="statsLoading">
         <template v-if="stats">
           <n-grid :cols="2" :x-gap="16" :y-gap="12" class="stats-overview">
@@ -223,8 +143,8 @@
       </n-spin>
     </n-modal>
 
-    <!-- ==================== 二维码 & 链接弹窗 ==================== -->
-    <n-modal v-model:show="showQRModal" title="分享链接" preset="card" style="width: 400px;">
+    <!-- ==================== 二维码 / 链接弹窗 ==================== -->
+    <n-modal v-model:show="showQRModal" title="分享链接" preset="card" style="width: 420px;">
       <div class="qr-container">
         <img :src="qrCodeUrl" alt="分享二维码" class="qr-image" />
         <n-input :value="currentShareUrl" readonly class="share-url-input">
@@ -234,6 +154,9 @@
             </n-button>
           </template>
         </n-input>
+        <n-text depth="3" style="font-size: 12px; text-align: center;">
+          扫描二维码或复制链接分享给他人
+        </n-text>
       </div>
     </n-modal>
   </div>
@@ -241,175 +164,45 @@
 
 <script setup lang="ts">
 import { ref, computed, h, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  NButton,
-  NDropdown,
-  NTag,
-  NPopconfirm,
-  NIcon,
+  NCard, NButton, NIcon, NInput, NSelect, NDataTable, NFlex, NText,
+  NModal, NForm, NFormItem, NDatePicker, NInputNumber, NSwitch, NCheckbox,
+  NSpace, NSpin, NGrid, NGi, NStatistic, NDivider, NH4, NEmpty,
+  NDropdown, NTag, NPopconfirm,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
 import {
-  CopyOutline,
-  ShareSocialOutline,
-  VideocamOutline,
-  ImageOutline,
-  AlbumsOutline
+  CopyOutline, RefreshOutline, SearchOutline
 } from '@vicons/ionicons5'
 import {
-  createShare,
   getMyShares,
   updateShare,
+  updateShareStatus,
   deleteShare,
   getShareStats,
   getShareQRCodeUrl,
   type ShareVO,
-  type ShareCreateDTO,
   type ShareUpdateDTO,
   type ShareStatsVO,
-  type ShareTargetType
+  type ShareTargetType,
+  type ShareStatus
 } from '../api/share'
-import { fetchVideoList } from '../api/manager'
-import { fetchImages } from '../api/images'
-import { fetchCollections, fetchImageCollections } from '../api/manager'
 
 const message = useMessage()
+const router = useRouter()
 
-// ==================== 顶层 Tab ====================
-const activeTab = ref<'create' | 'manage'>('create')
-
-// ==================== 媒体浏览 ====================
-const mediaType = ref<'video' | 'image' | 'collection'>('video')
-const mediaLoading = ref(false)
-const mediaPage = ref(1)
-const mediaPageSize = ref(12)
-const mediaTotalCount = ref(0)
-
-const videoItems = ref<any[]>([])
-const imageItems = ref<any[]>([])
-const collectionItems = ref<any[]>([])
-
-const currentMediaEmpty = computed(() => {
-  if (mediaType.value === 'video') return videoItems.value.length === 0
-  if (mediaType.value === 'image') return imageItems.value.length === 0
-  return collectionItems.value.length === 0
-})
-
-function toMediumUrl(url: string): string {
-  return url.replace(/\/raw\/[^/]+$/, '/medium/medium.jpg')
-}
-
-async function fetchMediaData() {
-  mediaLoading.value = true
-  try {
-    if (mediaType.value === 'video') {
-      const res: any = await fetchVideoList({
-        page: mediaPage.value,
-        pageSize: mediaPageSize.value,
-        collectionId: 0
-      })
-      videoItems.value = res.data || []
-      mediaTotalCount.value = res.total || 0
-    } else if (mediaType.value === 'image') {
-      const res: any = await fetchImages({
-        page: mediaPage.value,
-        pageSize: mediaPageSize.value
-      })
-      imageItems.value = res.data || []
-      mediaTotalCount.value = res.total || 0
-    } else {
-      const res: any = await fetchCollections({
-        page: mediaPage.value,
-        pageSize: mediaPageSize.value,
-        keyword: ''
-      })
-      collectionItems.value = Array.isArray(res) ? res : (res.data || [])
-      mediaTotalCount.value = Array.isArray(res) ? res.length : (res.total || res.length || 0)
-    }
-  } catch {
-    message.error('加载媒体列表失败')
-  } finally {
-    mediaLoading.value = false
-  }
-}
-
-function handleMediaPageSizeChange() {
-  mediaPage.value = 1
-  fetchMediaData()
-}
-
-watch(mediaType, () => {
-  mediaPage.value = 1
-  fetchMediaData()
-})
-
-// ==================== 创建分享 ====================
-const showCreateModal = ref(false)
-const submitting = ref(false)
-const createExpireTs = ref<number | null>(null)
-
-const selectedMedia = ref<{
-  targetType: ShareTargetType
-  targetId: number
-  name: string
-  coverUrl: string | null
-}>({
-  targetType: 'video',
-  targetId: 0,
-  name: '',
-  coverUrl: null
-})
-
-const createForm = ref({
-  title: '',
-  description: '',
-  password: '',
-  maxViews: null as number | null
-})
-
-const createDialogTitle = computed(() => {
-  return `分享${formatTargetType(selectedMedia.value.targetType)}`
-})
-
-function openShareDialog(type: ShareTargetType, id: number, name: string, coverUrl: string | null | undefined) {
-  selectedMedia.value = { targetType: type, targetId: id, name, coverUrl: coverUrl || null }
-  createForm.value = { title: '', description: '', password: '', maxViews: null }
-  createExpireTs.value = null
-  showCreateModal.value = true
-}
-
-async function handleCreate() {
-  const payload: ShareCreateDTO = {
-    targetType: selectedMedia.value.targetType,
-    targetId: selectedMedia.value.targetId
-  }
-  if (createForm.value.title) payload.title = createForm.value.title
-  if (createForm.value.description) payload.description = createForm.value.description
-  if (createForm.value.password) payload.password = createForm.value.password
-  if (createExpireTs.value) payload.expiresAt = new Date(createExpireTs.value).toISOString()
-  if (createForm.value.maxViews) payload.maxViews = createForm.value.maxViews
-
-  submitting.value = true
-  try {
-    const result = await createShare(payload)
-    message.success('分享创建成功')
-    showCreateModal.value = false
-    showQR(result)
-  } catch {
-    message.error('创建失败')
-  } finally {
-    submitting.value = false
-  }
-}
-
-// ==================== 我的分享列表 ====================
+// ==================== 列表数据 ====================
 const shareList = ref<ShareVO[]>([])
-const shareLoading = ref(false)
+const loading = ref(false)
 const sharePage = ref(1)
 const sharePageSize = ref(20)
-const shareTotalItems = ref(0)
+const totalRaw = ref(0)
+
+const keyword = ref('')
 const filterType = ref<ShareTargetType | null>(null)
+const filterStatus = ref<ShareStatus | null>(null)
 
 const targetTypeFilterOptions = [
   { label: '视频', value: 'video' },
@@ -417,48 +210,76 @@ const targetTypeFilterOptions = [
   { label: '合集', value: 'collection' }
 ]
 
+const statusFilterOptions = [
+  { label: '生效中', value: 'active' },
+  { label: '已过期', value: 'expired' },
+  { label: '已停用', value: 'disabled' }
+]
+
+/**
+ * 当前页客户端二次过滤：分享接口未支持服务端筛选，先在已加载页内做筛选；
+ * 列表的 itemCount 仍按服务端总数显示——避免因为筛选把页码变掉造成翻页错乱。
+ * 用户切换筛选后会重置到第一页，配合服务端分页拉新数据。
+ */
 const displayShares = computed(() => {
-  if (!filterType.value) return shareList.value
-  return shareList.value.filter(s => s.targetType === filterType.value)
+  let list = shareList.value
+  if (filterType.value) {
+    list = list.filter(s => s.targetType === filterType.value)
+  }
+  if (filterStatus.value) {
+    list = list.filter(s => s.status === filterStatus.value)
+  }
+  if (keyword.value.trim()) {
+    const kw = keyword.value.trim().toLowerCase()
+    list = list.filter(s =>
+      (s.title || '').toLowerCase().includes(kw)
+      || (s.description || '').toLowerCase().includes(kw)
+      || (s.shareCode || '').toLowerCase().includes(kw)
+    )
+  }
+  return list
 })
 
-const sharePagination = computed(() => ({
+const filteredCount = computed(() => displayShares.value.length)
+
+const pagination = computed(() => ({
   page: sharePage.value,
   pageSize: sharePageSize.value,
-  itemCount: shareTotalItems.value,
+  itemCount: totalRaw.value,
   showSizePicker: true,
-  pageSizes: [10, 20, 50]
+  pageSizes: [10, 20, 50],
+  prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 条`
 }))
 
 async function fetchShares() {
-  shareLoading.value = true
+  loading.value = true
   try {
     const res = await getMyShares(sharePage.value, sharePageSize.value)
     shareList.value = res.data
-    shareTotalItems.value = res.total
+    totalRaw.value = res.total
   } catch {
     message.error('获取分享列表失败')
   } finally {
-    shareLoading.value = false
+    loading.value = false
   }
 }
 
-function handleSharePageChange(page: number) {
+function onFilterChange() {
+  // 客户端筛选不需要重新拉数据，只重置当前页指示
+  // sharePage 不动，仍以服务端当前页为准
+}
+
+function handlePageChange(page: number) {
   sharePage.value = page
   fetchShares()
 }
-
-function handleSharePageSizeChange(size: number) {
+function handlePageSizeChange(size: number) {
   sharePageSize.value = size
   sharePage.value = 1
   fetchShares()
 }
 
-watch(activeTab, (tab) => {
-  if (tab === 'manage') fetchShares()
-})
-
-// ==================== 编辑分享 ====================
+// ==================== 编辑 ====================
 const showEditModal = ref(false)
 const editingId = ref(0)
 const editExpireTs = ref<number | null>(null)
@@ -467,8 +288,11 @@ const editForm = ref({
   description: '',
   password: '',
   clearPassword: false,
+  clearExpiresAt: false,
+  clearMaxViews: false,
   maxViews: null as number | null
 })
+const submitting = ref(false)
 
 function openEditModal(row: ShareVO) {
   editingId.value = row.id
@@ -477,31 +301,78 @@ function openEditModal(row: ShareVO) {
     description: row.description || '',
     password: '',
     clearPassword: false,
+    clearExpiresAt: false,
+    clearMaxViews: false,
     maxViews: row.maxViews
   }
   editExpireTs.value = row.expiresAt ? new Date(row.expiresAt).getTime() : null
   showEditModal.value = true
 }
 
+/**
+ * 三态字段处理：
+ * - 想保留：什么都不传（undefined）
+ * - 想改值：传新值
+ * - 想清空：传 clearXxx=true
+ *
+ * 普通字符串：空串 vs undefined 在后端被区别对待——这里把空串当作"清空标题"
+ * 显式发出，让用户能从 UI 把标题改回空。
+ */
 async function handleUpdate() {
   const payload: ShareUpdateDTO = {}
-  if (editForm.value.title) payload.title = editForm.value.title
-  if (editForm.value.description) payload.description = editForm.value.description
-  if (editForm.value.password) payload.password = editForm.value.password
-  if (editForm.value.clearPassword) payload.clearPassword = true
-  if (editExpireTs.value) payload.expiresAt = new Date(editExpireTs.value).toISOString()
-  if (editForm.value.maxViews) payload.maxViews = editForm.value.maxViews
+
+  payload.title = editForm.value.title
+  payload.description = editForm.value.description
+
+  if (editForm.value.clearPassword) {
+    payload.clearPassword = true
+  } else if (editForm.value.password) {
+    payload.password = editForm.value.password
+  }
+
+  if (editForm.value.clearExpiresAt) {
+    payload.clearExpiresAt = true
+  } else if (editExpireTs.value) {
+    if (editExpireTs.value <= Date.now()) {
+      message.warning('过期时间需晚于当前时间')
+      return
+    }
+    payload.expiresAt = new Date(editExpireTs.value).toISOString()
+  }
+
+  if (editForm.value.clearMaxViews) {
+    payload.clearMaxViews = true
+  } else if (editForm.value.maxViews && editForm.value.maxViews > 0) {
+    payload.maxViews = editForm.value.maxViews
+  }
 
   submitting.value = true
   try {
     await updateShare(editingId.value, payload)
     message.success('更新成功')
     showEditModal.value = false
-    fetchShares()
-  } catch {
-    message.error('更新失败')
+    await fetchShares()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || '更新失败')
   } finally {
     submitting.value = false
+  }
+}
+
+// ==================== 启用 / 停用 ====================
+async function handleToggleStatus(row: ShareVO) {
+  // expired 不允许直接转 active：先用 update 解除限制后再启用，更直观
+  if (row.status === 'expired') {
+    message.info('过期分享请先编辑取消过期时间或访问次数限制再启用')
+    return
+  }
+  const next = row.status === 'active' ? 'disabled' : 'active'
+  try {
+    await updateShareStatus(row.id, next)
+    message.success(next === 'active' ? '已启用' : '已停用')
+    await fetchShares()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || '操作失败')
   }
 }
 
@@ -510,7 +381,11 @@ async function handleDelete(id: number) {
   try {
     await deleteShare(id)
     message.success('删除成功')
-    fetchShares()
+    // 删完最后一条且不是首页时回退一页，避免空白页
+    if (shareList.value.length === 1 && sharePage.value > 1) {
+      sharePage.value -= 1
+    }
+    await fetchShares()
   } catch {
     message.error('删除失败')
   }
@@ -545,7 +420,7 @@ const accessColumns: DataTableColumns = [
   { title: '访问时间', key: 'accessedAt', width: 180, render: (row: any) => formatTime(row.accessedAt) }
 ]
 
-// ==================== 二维码 & 复制 ====================
+// ==================== 二维码 / 复制 ====================
 const showQRModal = ref(false)
 const qrCodeUrl = ref('')
 const currentShareUrl = ref('')
@@ -556,12 +431,37 @@ function showQR(share: ShareVO) {
   showQRModal.value = true
 }
 
+/**
+ * 复制到剪贴板，HTTPS 环境用 Clipboard API，否则降级 execCommand。
+ * 与 ShareDialog 中的实现保持一致。
+ */
 async function copyUrl(url: string) {
+  if (!url) return
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(url)
+      message.success('链接已复制')
+      return
+    } catch {
+      // 失败会落到下面的兜底分支
+    }
+  }
   try {
-    await navigator.clipboard.writeText(url)
-    message.success('链接已复制')
+    const textarea = document.createElement('textarea')
+    textarea.value = url
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    if (ok) {
+      message.success('链接已复制')
+    } else {
+      message.warning('复制失败，请手动复制链接')
+    }
   } catch {
-    message.error('复制失败')
+    message.warning('复制失败，请手动复制链接')
   }
 }
 
@@ -576,15 +476,6 @@ function formatTargetType(type: ShareTargetType) {
   return map[type] || type
 }
 
-function targetTagType(type: ShareTargetType) {
-  const map: Record<ShareTargetType, 'info' | 'success' | 'warning'> = {
-    video: 'info',
-    image: 'success',
-    collection: 'warning'
-  }
-  return map[type] || 'default'
-}
-
 function statusType(status: string) {
   const map: Record<string, 'success' | 'warning' | 'error'> = {
     active: 'success',
@@ -595,11 +486,15 @@ function statusType(status: string) {
 }
 
 function statusLabel(status: string) {
-  const map: Record<string, string> = { active: '有效', expired: '已过期', disabled: '已禁用' }
+  const map: Record<string, string> = { active: '生效中', expired: '已过期', disabled: '已停用' }
   return map[status] || status
 }
 
-// ==================== 分享列表列定义 ====================
+function goImage() { router.push('/manager/image') }
+function goVideo() { router.push('/manager/video') }
+function goCollection() { router.push('/manager/collection') }
+
+// ==================== 列定义 ====================
 const columns = computed<DataTableColumns<ShareVO>>(() => [
   {
     title: '标题',
@@ -616,7 +511,7 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
   {
     title: '状态',
     key: 'status',
-    width: 80,
+    width: 90,
     render: (row) => h(NTag, { type: statusType(row.status), size: 'small', bordered: false }, { default: () => statusLabel(row.status) })
   },
   {
@@ -646,17 +541,25 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 160,
+    width: 200,
+    fixed: 'right',
     render(row) {
       const moreOptions = [
         { label: '复制链接', key: 'copy' },
-        { label: '二维码', key: 'qr' },
-        { label: '统计', key: 'stats' }
+        { label: '查看二维码', key: 'qr' },
+        { label: '访问统计', key: 'stats' },
+        { type: 'divider', key: 'd1' },
+        {
+          label: row.status === 'active' ? '停用' : '启用',
+          key: 'toggle',
+          disabled: row.status === 'expired'
+        }
       ]
       const handleMoreSelect = (key: string) => {
         if (key === 'copy') copyUrl(row.shareUrl)
         else if (key === 'qr') showQR(row)
         else if (key === 'stats') openStatsModal(row.id)
+        else if (key === 'toggle') handleToggleStatus(row)
       }
       return h('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
         h(NButton, { size: 'small', onClick: () => openEditModal(row) }, { default: () => '编辑' }),
@@ -668,7 +571,7 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
           positiveText: '删除',
           negativeText: '取消'
         }, {
-          default: () => '确认删除此分享？访问日志也将被清除。',
+          default: () => '确认删除此分享？访问日志也将一同清除。',
           trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' })
         })
       ])
@@ -676,109 +579,59 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
   }
 ])
 
-// ==================== 生命周期 ====================
+watch([filterType, filterStatus], () => {
+  // 切换筛选回到第一页（服务端分页层面），重新拉数据让筛选生效在更大集合上
+  sharePage.value = 1
+  fetchShares()
+})
+
 onMounted(() => {
-  fetchMediaData()
+  fetchShares()
 })
 </script>
 
 <style scoped>
-.function-area {
-  margin-bottom: 16px;
+.share-manager-page {
+  padding: 24px;
 }
 
-/* 媒体卡片 */
-.media-card {
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+.page-card {
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
-.media-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
-}
-
-.cover-wrapper {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  position: relative;
-  background-color: #f5f5f5;
+.header {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.cover-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.cover-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  opacity: 0.5;
-}
-
-.media-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.media-card:hover .media-overlay {
-  opacity: 1;
-}
-
-/* 分享预览 */
-.share-preview {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.preview-thumb {
-  width: 100px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-
-.preview-placeholder {
-  width: 100px;
-  height: 64px;
-  border-radius: 6px;
-  background-color: #f5f5f5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.preview-info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.header-left {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.preview-title {
-  font-size: 15px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--n-text-color-3, #999);
+  line-height: 1.6;
+}
+
+.page-subtitle :deep(.n-button) {
+  padding: 0 4px;
+}
+
+.filter-bar {
+  margin-bottom: 16px;
+  margin-top: 4px;
 }
 
 /* 统计 */
@@ -791,17 +644,23 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
 .qr-image {
-  width: 250px;
-  height: 250px;
-  border: 1px solid #e0e0e6;
+  width: 240px;
+  height: 240px;
+  border: 1px solid var(--n-border-color, #e0e0e6);
   border-radius: 8px;
+  background: #fff;
 }
 
 .share-url-input {
   width: 100%;
 }
 </style>
+
+
+
+
+

@@ -9,6 +9,12 @@ export interface ImageParams {
   uuid?: string;
   /** 业务类型：photo / cover / other */
   type?: string;
+  /**
+   * 业务类型黑名单：从结果里剔除指定 type（如 'cover'）。
+   * 与 type 并存——同时传 type / excludeType 时取交集。
+   * 当前主要用于「分享管理」选图时排除封面图。
+   */
+  excludeType?: string;
   /** 标题 / 文件名 / 描述模糊匹配 */
   keyword?: string;
   /** 后端按 status 精确匹配（uploading / pending / processing / done / failed） */

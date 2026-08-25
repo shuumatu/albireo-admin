@@ -55,10 +55,6 @@ watch(route, () => {
 
 const menuOptions = [
   {
-    label: '地图',
-    key: '/map'
-  },
-  {
     label: '上传',
     key: '/upload'
   },
@@ -203,20 +199,41 @@ function handleUserMenuSelect(key: string) {
 }
 
 /* 菜单样式 */
-.menu :deep(.n-menu-item) {
+.menu :deep(.n-menu-item),
+.menu :deep(.n-submenu) {
   color: white;
   position: relative;
   padding: 0 20px;
 }
 
-/* 菜单项悬停样式 */
-.menu :deep(.n-menu-item:hover) {
-  background-color: #ffffff5e;
-  color: white;
+/* 仅给内层 menu-item-content 上色，外层 padding 与竖线保持原样
+   submenu 在 dropdown 真正展开前不会有 --hover，所以补一条 .n-submenu:hover .n-menu-item-content 让它即时响应 */
+.menu :deep(.n-menu-item:hover .n-menu-item-content),
+.menu :deep(.n-submenu:hover .n-menu-item-content),
+.menu :deep(.n-menu-item-content:hover),
+.menu :deep(.n-menu-item-content--hover),
+.menu :deep(.n-menu-item-content--child-active),
+.menu :deep(.n-menu-item-content--selected) {
+  background-color: #ffffff5e !important;
+  color: white !important;
+}
+
+/* 同步 hover/激活下文字与下拉箭头颜色，避免 naive-ui 默认变成主题蓝 */
+.menu :deep(.n-menu-item:hover .n-menu-item-content-header),
+.menu :deep(.n-submenu:hover .n-menu-item-content-header),
+.menu :deep(.n-menu-item-content--hover .n-menu-item-content-header),
+.menu :deep(.n-menu-item-content--child-active .n-menu-item-content-header),
+.menu :deep(.n-menu-item-content--selected .n-menu-item-content-header),
+.menu :deep(.n-submenu:hover .n-menu-item-content__arrow),
+.menu :deep(.n-menu-item-content--hover .n-menu-item-content__arrow),
+.menu :deep(.n-menu-item-content--child-active .n-menu-item-content__arrow),
+.menu :deep(.n-menu-item-content--selected .n-menu-item-content__arrow) {
+  color: white !important;
 }
 
 /* 菜单项之间添加竖线 */
-.menu :deep(.n-menu-item:not(:last-child)::after) {
+.menu :deep(.n-menu-item:not(:last-child)::after),
+.menu :deep(.n-submenu:not(:last-child)::after) {
   content: '';
   position: absolute;
   right: 0;

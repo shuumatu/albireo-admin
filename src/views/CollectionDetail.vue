@@ -12,6 +12,21 @@
         <n-tag size="small" :bordered="false" type="info" style="margin-left: 8px;">
           {{ collectionDetailStore.img ? '图片合集' : '视频合集' }}
         </n-tag>
+        <span style="flex: 1 1 auto;" />
+        <n-button
+          v-if="collection.id"
+          type="primary"
+          ghost
+          @click="openShareDialog"
+          title="分享这个合集"
+        >
+          <template #icon>
+            <svg viewBox="0 0 24 24" width="14" height="14">
+              <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92S19.61 16.08 18 16.08z" fill="currentColor"/>
+            </svg>
+          </template>
+          分享
+        </n-button>
       </div>
     </div>
 
@@ -110,30 +125,105 @@
     </div>
   </n-modal>
 
-  <!-- 添加视频/图片到合集弹窗 -->
+  <!-- 添加视频/图片到合集弹窗：大图标网格 -->
   <n-modal
     v-model:show="showAddItemsModal"
     :title="'添加' + (collectionDetailStore.img ? '图片' : '视频') + '到合集'"
     preset="card"
-    style="width: 80vw;"
+    style="width: 86vw; max-width: 1280px;"
     :mask-closable="false"
   >
+    <!-- 工具栏：搜索 + 全选 + 计数 -->
+    <div class="add-items-toolbar">
+      <n-input
+        v-model:value="addItemsKeyword"
+        :placeholder="`搜索${collectionDetailStore.img ? '图片' : '视频'}标题 / 文件名`"
+        clearable
+        style="width: 280px"
+        @keyup.enter="handleAddItemsSearch"
+        @clear="handleAddItemsSearch"
+      >
+        <template #prefix><n-icon><Search24Regular /></n-icon></template>
+      </n-input>
+      <n-button ghost type="primary" @click="handleAddItemsSearch">搜索</n-button>
+      <n-button
+        size="small"
+        :disabled="selectablePageItems.length === 0"
+        @click="toggleSelectAllInPage"
+      >
+        {{ isAllPageSelected ? '取消本页全选' : '本页全选' }}
+      </n-button>
+      <div class="add-items-toolbar__right">
+        <n-text depth="3">
+          共 {{ addItemsTotalCount }} 项 · 已选 {{ addItemsSelectedKeys.length }}
+        </n-text>
+      </div>
+    </div>
+
     <n-spin :show="addItemsLoading">
-      <n-data-table
-        :columns="addItemsColumns"
-        :data="allItems"
-        :row-key="(row: any) => row.id"
-        v-model:checked-row-keys="addItemsSelectedKeys"
-        :max-height="400"
-      />
+      <div class="add-items-grid-wrapper">
+        <div v-if="!addItemsLoading && allItems.length === 0" class="add-items-empty">
+          <n-empty :description="`暂无${collectionDetailStore.img ? '图片' : '视频'}`" />
+        </div>
+        <div v-else class="add-items-grid">
+          <div
+            v-for="item in allItems"
+            :key="item.id"
+            :class="[
+              'pick-card',
+              {
+                'pick-card--selected': addItemsSelectedKeys.includes(item.id),
+                'pick-card--in-collection': isItemInCurrentCollection(item),
+                'pick-card--video': !collectionDetailStore.img,
+              },
+            ]"
+            @click="togglePickItem(item)"
+          >
+            <div class="pick-card__cover">
+              <img
+                v-if="getThumb(item)"
+                :src="getThumb(item)!"
+                :alt="getItemTitle(item)"
+                class="pick-card__img"
+                loading="lazy"
+              />
+              <div v-else class="pick-card__placeholder">
+                <n-icon size="36" color="#bbb">
+                  <component :is="collectionDetailStore.img ? Image24Regular : VideoClip24Regular" />
+                </n-icon>
+              </div>
+
+              <!-- 选中遮罩 -->
+              <div class="pick-card__check">
+                <n-icon size="14"><Checkmark24Filled /></n-icon>
+              </div>
+
+              <!-- 已在合集中的角标 -->
+              <div v-if="isItemInCurrentCollection(item)" class="pick-card__badge">
+                已在合集
+              </div>
+            </div>
+
+            <div class="pick-card__info">
+              <div class="pick-card__title" :title="getItemTitle(item)">
+                {{ getItemTitle(item) }}
+              </div>
+              <div class="pick-card__sub" :title="item.fileName">
+                {{ item.fileName }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </n-spin>
+
     <n-flex justify="space-between" align="center" style="margin-top: 16px;">
       <n-pagination
         v-model:page="addItemsPage"
         v-model:page-size="addItemsPageSize"
         :item-count="addItemsTotalCount"
         show-size-picker
-        :page-sizes="[10, 20, 50]"
+        :page-sizes="[12, 24, 48]"
         @update:page="fetchAllItems"
         @update:page-size="handleAddItemsPageSizeChange"
       />
@@ -149,15 +239,22 @@
       </n-flex>
     </n-flex>
   </n-modal>
+
+  <!-- 分享对话框 -->
+  <ShareDialog
+    v-model:show="shareDialogShow"
+    :target="shareTarget"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onBeforeMount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, type DataTableColumns } from 'naive-ui'
+import { useMessage } from 'naive-ui'
 import dayjs from 'dayjs'
 import VideoMetaManager from './VideoMetaManager.vue'
 import ImageManager from './image/ImageListPage.vue'
+import ShareDialog from '../components/share/ShareDialog.vue'
 import { useCollectionStore, useCollectionDetailStore } from '../stores/collection'
 import { fetchCollectionWithCover, fetchImageCollectionWithCover, fetchVideoList, addVideosToCollections } from '../api/manager'
 import { useImageManagerStore } from '../stores/imageManager'
@@ -173,6 +270,8 @@ import {
   CalendarLtr24Regular,
   Save24Regular,
   Add24Filled,
+  Search24Regular,
+  Checkmark24Filled,
 } from '@vicons/fluent'
 
 const collectionStore = useCollectionStore()
@@ -188,37 +287,35 @@ const id = Array.isArray(idParam) ? parseInt(idParam[0], 10) : parseInt(idParam 
 const collection = ref<any>({})
 const refreshKey = ref(0)
 
+// ==================== 分享 ====================
+const shareDialogShow = ref(false)
+const shareTarget = ref<{ targetType: 'collection'; targetId: number; name: string; coverUrl: string | null } | null>(null)
+
+function openShareDialog() {
+  if (!collection.value?.id) return
+  shareTarget.value = {
+    targetType: 'collection',
+    targetId: collection.value.id,
+    name: collection.value.name || `合集 #${collection.value.id}`,
+    coverUrl: collection.value.imageUrl || null,
+  }
+  shareDialogShow.value = true
+}
+
 // ==================== 添加视频/图片到合集 ====================
 const showAddItemsModal = ref(false)
 const addItemsLoading = ref(false)
 const allItems = ref<any[]>([])
 const addItemsSelectedKeys = ref<number[]>([])
 const addItemsPage = ref(1)
-const addItemsPageSize = ref(20)
+const addItemsPageSize = ref(24)
 const addItemsTotalCount = ref(0)
-
-const addItemsColumns = computed<DataTableColumns>(() => {
-  const selectionCol = { type: 'selection' as const }
-  if (collectionDetailStore.img) {
-    return [
-      selectionCol,
-      { title: '文件名', key: 'fileName' },
-      { title: '标题', key: 'title', render: (row: any) => row.title || '-' },
-      { title: '描述', key: 'description', render: (row: any) => row.description || '-', ellipsis: { tooltip: true } }
-    ]
-  }
-  return [
-    selectionCol,
-    { title: '标题', key: 'title', render: (row: any) => row.title || '-' },
-    { title: '文件名', key: 'fileName' },
-    { title: '合集', key: 'collections', render: (row: any) => row.collections?.length ? row.collections.map((c: any) => c.name).join(', ') : '-' },
-    { title: '创建时间', key: 'createdAt', render: (row: any) => new Date(row.createdAt).toLocaleString('zh-CN') }
-  ]
-})
+const addItemsKeyword = ref('')
 
 function openAddItemsModal() {
   addItemsSelectedKeys.value = []
   addItemsPage.value = 1
+  addItemsKeyword.value = ''
   showAddItemsModal.value = true
   fetchAllItems()
 }
@@ -227,11 +324,21 @@ async function fetchAllItems() {
   addItemsLoading.value = true
   try {
     if (collectionDetailStore.img) {
-      const res: any = await fetchImages({ page: addItemsPage.value, pageSize: addItemsPageSize.value })
+      // type 留空 = 不限类型；后端 `type` 为 null 时返回全量
+      const res: any = await fetchImages({
+        page: addItemsPage.value,
+        pageSize: addItemsPageSize.value,
+        keyword: addItemsKeyword.value || undefined,
+      })
       allItems.value = res.data || []
       addItemsTotalCount.value = res.total || 0
     } else {
-      const res: any = await fetchVideoList({ page: addItemsPage.value, pageSize: addItemsPageSize.value, collectionId: 0 })
+      const res: any = await fetchVideoList({
+        page: addItemsPage.value,
+        pageSize: addItemsPageSize.value,
+        collectionId: 0,
+        keyword: addItemsKeyword.value || undefined,
+      })
       allItems.value = res.data || []
       addItemsTotalCount.value = res.total || 0
     }
@@ -245,6 +352,60 @@ async function fetchAllItems() {
 function handleAddItemsPageSizeChange() {
   addItemsPage.value = 1
   fetchAllItems()
+}
+
+function handleAddItemsSearch() {
+  addItemsPage.value = 1
+  fetchAllItems()
+}
+
+// 取缩略图：图片用 imageUrl；视频用 coverUrl
+function getThumb(item: any): string | null {
+  if (collectionDetailStore.img) return item.imageUrl || null
+  return item.coverUrl || null
+}
+
+function getItemTitle(item: any): string {
+  return item.title || item.fileName || `#${item.id}`
+}
+
+function isItemInCurrentCollection(item: any): boolean {
+  if (!item?.collections || !Array.isArray(item.collections)) return false
+  return item.collections.some((c: any) => Number(c.id) === id)
+}
+
+function togglePickItem(item: any) {
+  const idx = addItemsSelectedKeys.value.indexOf(item.id)
+  if (idx >= 0) {
+    addItemsSelectedKeys.value.splice(idx, 1)
+  } else {
+    addItemsSelectedKeys.value.push(item.id)
+  }
+}
+
+// 当前页可被选中（即未在当前合集中）的项
+const selectablePageItems = computed(() =>
+  allItems.value.filter((item) => !isItemInCurrentCollection(item))
+)
+
+const isAllPageSelected = computed(() => {
+  if (selectablePageItems.value.length === 0) return false
+  return selectablePageItems.value.every((item) =>
+    addItemsSelectedKeys.value.includes(item.id)
+  )
+})
+
+function toggleSelectAllInPage() {
+  if (isAllPageSelected.value) {
+    const removeIds = new Set(selectablePageItems.value.map((it) => it.id))
+    addItemsSelectedKeys.value = addItemsSelectedKeys.value.filter(
+      (k) => !removeIds.has(k)
+    )
+  } else {
+    const next = new Set(addItemsSelectedKeys.value)
+    for (const it of selectablePageItems.value) next.add(it.id)
+    addItemsSelectedKeys.value = Array.from(next)
+  }
 }
 
 async function confirmAddItems() {
@@ -469,5 +630,152 @@ onBeforeMount(() => {
 
 .media-body {
   padding: 20px 24px;
+}
+
+/* ===== 添加图片/视频弹窗：网格 ===== */
+.add-items-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.add-items-toolbar__right {
+  margin-left: auto;
+}
+
+.add-items-grid-wrapper {
+  min-height: 320px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.add-items-empty {
+  padding: 60px 0;
+  display: flex;
+  justify-content: center;
+}
+
+/*
+  网格密度：图片用更小的方格（1:1），视频比例宽（16:9）。
+  通过 .pick-card--video 切换 aspect-ratio 即可，不必拆两套布局。
+*/
+.add-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 14px;
+}
+
+.pick-card {
+  position: relative;
+  cursor: pointer;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--n-card-color, #fff);
+  border: 2px solid transparent;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  user-select: none;
+}
+
+.pick-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
+.pick-card--selected {
+  border-color: var(--n-primary-color, #18a058);
+  box-shadow: 0 6px 18px rgba(24, 160, 88, 0.18);
+}
+
+.pick-card--in-collection {
+  opacity: 0.78;
+}
+.pick-card--in-collection:hover {
+  opacity: 1;
+}
+
+.pick-card__cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: linear-gradient(135deg, #f5f5f5 0%, #ebebeb 100%);
+  overflow: hidden;
+}
+
+.pick-card--video .pick-card__cover {
+  aspect-ratio: 16 / 10;
+}
+
+.pick-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pick-card__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pick-card__check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1.5px solid rgba(0, 0, 0, 0.18);
+  color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.pick-card--selected .pick-card__check {
+  background: var(--n-primary-color, #18a058);
+  border-color: var(--n-primary-color, #18a058);
+  color: #fff;
+}
+
+.pick-card__badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.pick-card__info {
+  padding: 8px 10px 10px;
+}
+
+.pick-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+}
+
+.pick-card__sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

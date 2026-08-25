@@ -173,8 +173,15 @@
       @navigate="onDrawerNavigate"
       @open-public="onDrawerOpenPublic"
       @delete="onDrawerDelete"
+      @share="(v: VideoItem) => openShareDialog(v)"
       @patched="onDrawerPatched"
       @collections-changed="onDrawerCollectionsChanged"
+    />
+
+    <!-- 分享对话框（卡片菜单 / 列表菜单 / 抽屉头部任一入口触发） -->
+    <ShareDialog
+      v-model:show="shareDialogShow"
+      :target="shareTarget"
     />
 
     <!-- 悬停预览 popover -->
@@ -209,6 +216,7 @@ import VideoListRow from './VideoListRow.vue'
 import VideoFloatingActionBar from './VideoFloatingActionBar.vue'
 import VideoEditDrawer from './VideoEditDrawer.vue'
 import VideoHoverPreview from './VideoHoverPreview.vue'
+import ShareDialog from '../../components/share/ShareDialog.vue'
 import { useVideoQuery } from './composables/useVideoQuery'
 import { useVideoSelection } from './composables/useVideoSelection'
 import { getPublicSiteOrigin } from './composables/videoFormat'
@@ -452,10 +460,27 @@ function onCardMenu(video: VideoItem, action: string) {
     case 'copy-key':
       copyKey(video)
       break
+    case 'share':
+      openShareDialog(video)
+      break
     case 'delete':
       confirmDeleteOne(video)
       break
   }
+}
+
+// ---------- 分享 ----------
+const shareDialogShow = ref(false)
+const shareTarget = ref<{ targetType: 'video'; targetId: number; name: string; coverUrl: string | null } | null>(null)
+
+function openShareDialog(video: VideoItem) {
+  shareTarget.value = {
+    targetType: 'video',
+    targetId: video.id,
+    name: video.title || video.fileName || `视频 #${video.id}`,
+    coverUrl: video.coverUrl || null,
+  }
+  shareDialogShow.value = true
 }
 
 function openPublic(video: VideoItem) {

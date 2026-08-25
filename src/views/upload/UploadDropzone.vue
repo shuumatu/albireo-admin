@@ -11,7 +11,7 @@
     @dragenter.prevent="onDragEnter"
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
-    @drop.prevent="onDrop"
+    @drop.prevent.stop="onDrop"
   >
     <input
       ref="inputRef"
@@ -157,6 +157,10 @@ function onWindowDrop(e: DragEvent) {
   // 兜底：避免浏览器把文件当导航处理
   e.preventDefault()
   clearMask()
+  // dropzone 元素自身的 @drop 已经处理过这批文件（并 stopPropagation），
+  // 这里通过 defaultPrevented 判断避免同一批 files 被 emit 两次，
+  // 导致第二次进入 enqueueFiles 时全部命中弱去重并误报「跳过 N 个重复文件」。
+  if (e.defaultPrevented) return
   // 全屏遮罩承诺"任何位置 drop 都生效"，所以 window 级 drop 也接受文件
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length) emit('files', files)

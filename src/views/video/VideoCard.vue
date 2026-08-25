@@ -199,6 +199,8 @@ const menuOptions = computed(() => {
   ]
   if (!overlayStatus.value) {
     opts.push({ label: '设置封面帧', key: 'set-cover' })
+    // 仅 done 视频可分享：处理中 / 转码失败的视频对外不可播放
+    opts.push({ label: '分享', key: 'share' })
   }
   opts.push({ label: '复制对象 Key', key: 'copy-key' })
   opts.push({ type: 'divider', key: 'd1' })

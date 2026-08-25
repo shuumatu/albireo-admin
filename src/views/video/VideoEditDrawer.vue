@@ -41,6 +41,22 @@
             </svg>
           </n-button>
           <span class="drawer-title">{{ video?.title || video?.fileName || '视频详情' }}</span>
+          <span style="flex: 1 1 auto;" />
+          <n-button
+            v-if="video && (!video.status || video.status === 'done')"
+            size="small"
+            quaternary
+            type="primary"
+            @click="$emit('share', video)"
+            title="分享这个视频"
+          >
+            <template #icon>
+              <svg viewBox="0 0 24 24" width="14" height="14">
+                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92S19.61 16.08 18 16.08z" fill="currentColor"/>
+              </svg>
+            </template>
+            分享
+          </n-button>
         </n-flex>
       </template>
 
@@ -70,22 +86,25 @@
           <div v-else class="drawer-cover__placeholder">无封面</div>
         </div>
 
-        <!-- 标题：默认像普通文字，hover 出下划线，聚焦后变 input。失焦自动保存 -->
-        <div class="title-edit">
-          <input
-            class="title-edit__input"
-            type="text"
-            :value="form.title ?? ''"
-            :placeholder="video.fileName || '未命名视频'"
-            @input="onTitleInput(($event.target as HTMLInputElement).value)"
-            @blur="flushTitle"
-            @keydown.enter="(e) => { (e.target as HTMLInputElement).blur() }"
-          />
-        </div>
-
         <!-- 基础信息 -->
         <div class="section">
           <div class="section__title">基础</div>
+          <!--
+            标题独立成一个明显的输入框（带 label）。
+            过去做成「默认像普通文字 hover 出下划线」太隐蔽，
+            用户根本意识不到能编辑，这里和「描述」等字段对齐为标准 n-input。
+          -->
+          <div class="field">
+            <label>标题</label>
+            <n-input
+              :value="form.title ?? ''"
+              :placeholder="video.fileName || '未命名视频'"
+              clearable
+              @update:value="onTitleInput"
+              @blur="flushTitle"
+              @keydown.enter="(e: any) => { (e?.target as HTMLInputElement)?.blur() }"
+            />
+          </div>
           <div class="field">
             <label>描述</label>
             <n-input
@@ -248,6 +267,7 @@ const emit = defineEmits<{
   (e: 'navigate', delta: -1 | 1): void
   (e: 'open-public'): void
   (e: 'delete'): void
+  (e: 'share', video: VideoItem): void
   /** 字段级保存成功后通知父组件刷列表 / patch 列表中的视频对象 */
   (e: 'patched', videoId: number, patch: Partial<VideoItem>): void
   (e: 'collections-changed', videoId: number, collectionIds: number[]): void
@@ -544,26 +564,6 @@ async function onLocationSave() {
   justify-content: center;
   color: rgba(255, 255, 255, 0.55);
   font-size: 12px;
-}
-
-.title-edit__input {
-  width: 100%;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid transparent;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--n-text-color);
-  padding: 4px 0;
-  outline: none;
-  transition: border-color 0.15s ease;
-}
-/* 用 divider token：浅色下淡灰、深色下淡白都能看见 */
-.title-edit__input:hover {
-  border-bottom-color: var(--n-divider-color);
-}
-.title-edit__input:focus {
-  border-bottom-color: var(--n-primary-color);
 }
 
 .section {
