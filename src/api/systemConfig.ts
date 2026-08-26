@@ -4,13 +4,14 @@ export interface SystemConfigVO {
   id: number
   category: string
   key: string
-  value: string
+  value: string | null
   valueType: string
   isEncrypted: boolean
   description: string | null
   metadata: string | null
   createdAt: string
   updatedAt: string
+  configured?: boolean
 }
 
 export interface SystemConfigCreateDTO {
@@ -36,6 +37,11 @@ export interface PageResultVO<T> {
 
 export function fetchAllConfigs(): Promise<SystemConfigVO[]> {
   return request.get('/system-config')
+}
+
+/** 管理端安全清单：加密字段只返回 configured 状态，不返回明文。 */
+export function fetchManagedConfigs(): Promise<SystemConfigVO[]> {
+  return request.get('/system-config/managed')
 }
 
 export function fetchAllConfigsWithPagination(
@@ -79,10 +85,3 @@ export function updateConfig(
     payload
   )
 }
-
-export function deleteConfig(category: string, key: string): Promise<void> {
-  return request.delete(
-    `/system-config/${encodeURIComponent(category)}/${encodeURIComponent(key)}`
-  )
-}
-
