@@ -42,7 +42,7 @@ export function fetchReprocessList(params: {
   pageSize?: number
   type?: 'all' | 'video' | 'image'
 }) {
-  return request.get<ReprocessListResponse>('/reprocess/list', { params })
+  return request.get<ReprocessListResponse, ReprocessListResponse>('/reprocess/list', { params })
 }
 
 /** 重投响应。requeued 是视频侧本次重投的缺失档列表；图片场景为空。 */
@@ -57,5 +57,5 @@ export interface RetryResult {
 
 /** 统一重投入口：mediaType='video' 走转码缺失档 + 封面，'image' 走 image.process。 */
 export function retryReprocess(mediaType: 'video' | 'image', hash: string) {
-  return request.post<RetryResult>('/reprocess/retry', { mediaType, hash })
+  return request.post<RetryResult, RetryResult>('/reprocess/retry', { mediaType, hash })
 }

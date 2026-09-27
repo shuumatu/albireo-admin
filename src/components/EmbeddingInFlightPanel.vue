@@ -26,14 +26,19 @@
             :key="t.mediaType + '#' + t.mediaId"
             class="ifp-row"
             :class="rowClass(t)"
+            role="button"
+            tabindex="0"
+            title="在下方媒体清单中定位"
+            @click="locateTask(t)"
+            @keydown.enter="locateTask(t)"
           >
             <div class="ifp-row-head">
-              <span class="ifp-mtype">{{ t.mediaType === 'video' ? '🎬' : '🖼' }}</span>
+              <span class="ifp-mtype">{{ t.mediaType === 'video' ? '视频' : '图片' }}</span>
               <span class="ifp-id">#{{ t.mediaId }}</span>
-              <span v-if="t.hash" class="ifp-hash">{{ t.hash.slice(0, 6) }}</span>
+              <span v-if="t.hash" class="ifp-hash">{{ t.hash.slice(0, 12) }}</span>
               <span class="ifp-stage">{{ stageLabel(t) }}</span>
               <span class="ifp-spacer"></span>
-              <span class="ifp-elapsed">{{ formatElapsed(t.elapsedMs) }}</span>
+              <span class="ifp-elapsed">{{ formatElapsed(displayElapsed(t)) }}</span>
             </div>
             <div class="ifp-bar-wrap">
               <div class="ifp-bar" :style="{ width: barPct(t) + '%' }"></div>
@@ -58,8 +63,15 @@ const tasks = ref<InFlightTask[]>([])
 const collapsed = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 let inflight = false  // 防止上一轮还没回来又发新一轮（极端慢网络）
+const nowMs = ref(Date.now())
+
+const emit = defineEmits<{
+  (e: 'locate', task: InFlightTask): void
+}>()
 
 async function pollOnce() {
+  if (document.hidden) return
+  nowMs.value = Date.now()
   if (inflight) return
   inflight = true
   try {
@@ -82,6 +94,7 @@ async function pollOnce() {
 onMounted(() => {
   pollOnce()
   timer = setInterval(pollOnce, POLL_INTERVAL_MS)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
@@ -89,7 +102,12 @@ onBeforeUnmount(() => {
     clearInterval(timer)
     timer = null
   }
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
+
+function onVisibilityChange() {
+  if (!document.hidden) pollOnce()
+}
 
 const visibleTasks = computed(() => tasks.value)
 const inProgressCount = computed(() => visibleTasks.value.filter(t => !t.done).length)
@@ -150,6 +168,14 @@ function formatElapsed(ms: number): string {
   const h = Math.floor(m / 60)
   const mm = m % 60
   return `${h}:${String(mm).padStart(2, '0')}`
+}
+
+function displayElapsed(t: InFlightTask): number {
+  return t.done ? t.elapsedMs : Math.max(t.elapsedMs, nowMs.value - t.startedAt)
+}
+
+function locateTask(task: InFlightTask) {
+  emit('locate', task)
 }
 </script>
 
@@ -227,6 +253,12 @@ function formatElapsed(ms: number): string {
   padding: 6px 8px;
   border-radius: 4px;
   transition: background 0.2s;
+  cursor: pointer;
+}
+.ifp-row:hover,
+.ifp-row:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
 }
 .ifp-row.is-done   { border-left-color: #22c55e; opacity: 0.85; }
 .ifp-row.is-failed { border-left-color: #ef4444; }

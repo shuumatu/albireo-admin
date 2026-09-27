@@ -120,7 +120,6 @@
             <label>可见性</label>
             <n-radio-group :value="form.visibility ?? 'private'" @update:value="onVisibilityChange">
               <n-radio value="private">私密</n-radio>
-              <n-radio value="friends">好友</n-radio>
               <n-radio value="public">公开</n-radio>
             </n-radio-group>
           </div>
@@ -347,7 +346,7 @@ watch(
     form.value = {
       title: v.title ?? '',
       description: v.description ?? '',
-      visibility: v.visibility ?? 'private',
+      visibility: v.visibility === 'public' ? 'public' : 'private',
       shotAt: v.shotAt ?? null,
     }
     initialForm.value = { ...form.value }

@@ -6,7 +6,7 @@
           <n-flex align="center" :size="12">
             <span>当前模型：</span>
             <n-tag :type="currentModel === 'gemini' ? 'success' : 'info'" size="large">
-              {{ modelLabels[currentModel] ?? currentModel ?? '未知' }}
+              {{ currentModel ? (modelLabels[currentModel] ?? currentModel) : '未知' }}
             </n-tag>
           </n-flex>
 

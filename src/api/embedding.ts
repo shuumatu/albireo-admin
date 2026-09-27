@@ -22,9 +22,35 @@ export interface EmbeddingSourceStatsEnvelope {
   videos: EmbeddingSourceStats
 }
 
+export interface EmbeddingOverview {
+  images: EmbeddingSourceStats
+  videos: EmbeddingSourceStats
+  running: number
+  recentFailed: number
+  tasks: number
+}
+
+export interface EmbeddingRuntime {
+  mode: 'local' | 'external' | string
+  local: boolean
+  running: boolean
+  pid: number | null
+  restartCount: number
+  maxRestarts: number
+  workingDir?: string
+  lastError?: string | null
+  health?: { reachable?: boolean; status?: string; loaded?: boolean; model?: string; dim?: number; error?: string | null }
+  adoptedExternal?: boolean
+  waitingForPort?: boolean
+}
+
 export interface EmbeddingAdminRow {
   id: number
   hash: string
+  uuid: string | null
+  title: string | null
+  fileName: string | null
+  previewUrl: string | null
   embeddingSource: number | null
   embeddingAttempts: number | null
 }
@@ -35,6 +61,42 @@ export function getEmbeddingProgress() {
 
 export function getEmbeddingSourceStats() {
   return request.get<EmbeddingSourceStatsEnvelope>('/embedding/source-stats')
+}
+
+export function getEmbeddingOverview() {
+  return request.get<EmbeddingOverview>('/embedding/overview')
+}
+
+export function getEmbeddingCalibration() {
+  return request.get<Record<string, any>>('/embedding/calibration', { timeout: 8_000 })
+}
+
+export function recalculateEmbeddingCalibration(samples?: number) {
+  return request.post<{ ok: boolean; detail?: Record<string, any>; error?: string }>(
+    '/embedding/calibration/recalculate', null, { params: samples ? { samples } : undefined, timeout: 310_000 }
+  )
+}
+
+export function retryEmbeddingBatch(mediaType: 'image' | 'video', ids: number[]) {
+  return request.post<{ accepted: number; enqueued: number; failed: number }>('/embedding/retry-batch', {
+    mediaType, ids
+  })
+}
+
+export function getEmbeddingRuntime() {
+  return request.get<EmbeddingRuntime>('/embedding/runtime', { timeout: 8_000 })
+}
+
+export function startEmbeddingRuntime() {
+  return request.post<EmbeddingRuntime>('/embedding/runtime/start', null, { timeout: 10_000 })
+}
+
+export function stopEmbeddingRuntime() {
+  return request.post<EmbeddingRuntime>('/embedding/runtime/stop', null, { timeout: 10_000 })
+}
+
+export function restartEmbeddingRuntime() {
+  return request.post<EmbeddingRuntime>('/embedding/runtime/restart', null, { timeout: 10_000 })
 }
 
 export function listEmbeddingRows(
@@ -53,7 +115,7 @@ export function listEmbeddingRows(
  * - `affected`: reset 影响的行数（一般 0 或 1）
  * - `enqueued`: 是否成功向 MQ 投递了新的嵌入任务。
  *               affected=1 但 enqueued=false 通常表示缺 url（视频未转码完成等），
- *               已无定时回填，需要稍后重新点击「立即重新嵌入」/「重试」补救。
+ *               已无定时回填，需要稍后重新点击“重新嵌入”补救。
  */
 export function retryEmbedding(mediaType: 'image' | 'video', id: number) {
   return request.post<{ affected: number; enqueued: boolean }>(

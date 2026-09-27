@@ -80,6 +80,13 @@
               :rows="4"
             />
           </n-form-item>
+          <n-form-item label="可见性">
+            <n-radio-group v-model:value="collection.visibility">
+              <n-radio-button value="private">私密</n-radio-button>
+              <n-radio-button value="public">公开</n-radio-button>
+            </n-radio-group>
+          </n-form-item>
+          <n-text depth="3">公开合集只展示其中已公开的媒体，不会改变成员的可见性。</n-text>
         </n-form>
         <div class="form-actions">
           <n-button type="primary" size="large" @click="saveCollection">
@@ -435,7 +442,8 @@ async function saveCollection() {
     const params = {
       id: collection.value.id,
       name: collection.value.name,
-      description: collection.value.description
+      description: collection.value.description,
+      visibility: collection.value.visibility ?? 'private'
     }
     if (collectionDetailStore.img) {
       await saveImageCollection(params)

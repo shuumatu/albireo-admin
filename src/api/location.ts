@@ -14,8 +14,8 @@ export interface LocationUpdateDTO {
 
 export async function fetchVideoLocation(uuid: string): Promise<LocationVO | null> {
   try {
-    const data = await request.get<LocationVO>(`/video/${uuid}/location`)
-    return data as LocationVO
+    const data = await request.get<LocationVO, LocationVO>(`/video/${uuid}/location`)
+    return data
   } catch (err: any) {
     if (err?.response?.status === 404) {
       return null
@@ -30,8 +30,8 @@ export function updateVideoLocation(uuid: string, payload: LocationUpdateDTO) {
 
 export async function fetchImageLocation(uuid: string): Promise<LocationVO | null> {
   try {
-    const data = await request.get<LocationVO>(`/image/${uuid}/location`)
-    return data as LocationVO
+    const data = await request.get<LocationVO, LocationVO>(`/image/${uuid}/location`)
+    return data
   } catch (err: any) {
     if (err?.response?.status === 404) {
       return null

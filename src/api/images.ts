@@ -43,6 +43,7 @@ export interface ImageItem {
   description: string | null;
   type: string;
   status: string;
+  visibility?: 'private' | 'public';
   createdAt?: string | null;
   updatedAt?: string | null;
   shotAt?: string | null;
@@ -70,6 +71,7 @@ export function deleteImage(ids: number[]) {
 }
 
 export interface updateImageParams {
+  visibility?: 'private' | 'public';
   title?: string | null;
   description?: string | null;
   type?: string | null;

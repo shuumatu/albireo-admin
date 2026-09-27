@@ -248,7 +248,7 @@ const pagination = computed(() => ({
   itemCount: totalRaw.value,
   showSizePicker: true,
   pageSizes: [10, 20, 50],
-  prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 条`
+  prefix: ({ itemCount }: { itemCount?: number }) => `共 ${itemCount ?? 0} 条`
 }))
 
 async function fetchShares() {

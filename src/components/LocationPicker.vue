@@ -6,7 +6,8 @@
         <n-input
           v-model:value="latInput"
           placeholder="例如 23.1291"
-          type="number"
+          type="text"
+          inputmode="decimal"
           style="width: 140px;"
           @blur="applyCoordInput"
         />
@@ -14,7 +15,8 @@
         <n-input
           v-model:value="lngInput"
           placeholder="例如 113.2644"
-          type="number"
+          type="text"
+          inputmode="decimal"
           style="width: 140px;"
           @blur="applyCoordInput"
         />
@@ -61,22 +63,10 @@ export interface LocationPoint {
   lng: number
 }
 
-/**
- * 4 种底图：
- *  - protomaps-light / protomaps-dark：与公共站「地图检索」页同款 Immich-style 矢量底图
- *    （瓦片来源 protomaps.com，需要 VITE_PROTOMAPS_KEY，样式 JSON 放在 public/map-styles/）。
- *  - normal：UI 上称作「普通」，底层瓦片用高德 raster——国内场景下视觉/标注更直观，
- *            坐标系是 GCJ-02，会激活 toDisplay/toStoreCoord 的偏移转换。
- *            这里没有再单独提供原 OpenStreetMap raster 选项，避免与浅色 vector 重复，
- *            也避免国内打开 OSM 因瓦片源慢而体验差。
- *  - satellite：Esri 世界影像，给视频/图片选位置时确认建筑/地形（WGS-84）。
- *
- * 坐标系策略：
- *   * DB 存的坐标按"国内 GCJ-02 / 境外 WGS-84"区分（与 Map.vue 一致）。
- *   * 高德底图（normal）直接用 GCJ-02；protomaps / satellite 用 WGS-84。
- *   * 切底图时如果是国内点，需要 toDisplayCoord 反算一次，避免点被搬走。
+/** Vector and satellite maps use WGS84 display coordinates.
+ * Existing stored coordinates retain their legacy conversion until a separate data migration.
  */
-type LayerId = 'protomaps-light' | 'protomaps-dark' | 'normal' | 'satellite'
+type LayerId = 'protomaps-light' | 'protomaps-dark' | 'satellite'
 
 interface VectorLayerDef {
   id: 'protomaps-light' | 'protomaps-dark'
@@ -86,11 +76,9 @@ interface VectorLayerDef {
 }
 
 interface RasterLayerDef {
-  id: 'normal' | 'satellite'
+  id: 'satellite'
   name: string
   type: 'raster'
-  /** 是否使用 GCJ-02 坐标系（仅"普通"——背后是高德） */
-  isGcj02: boolean
 }
 
 type LayerDef = VectorLayerDef | RasterLayerDef
@@ -98,10 +86,7 @@ type LayerDef = VectorLayerDef | RasterLayerDef
 const LAYER_DEFS: LayerDef[] = [
   { id: 'protomaps-light', name: '浅色', type: 'vector', styleUrl: '/map-styles/light.json' },
   { id: 'protomaps-dark', name: '深色', type: 'vector', styleUrl: '/map-styles/dark.json' },
-  // 「普通」按钮在 UI 上保持原有位置/名字，但瓦片源从 OSM 切换到高德——
-  // 这是一次"显示名不变、底层数据源变"的替换，附带变更：开启 GCJ-02 坐标系。
-  { id: 'normal', name: '普通', type: 'raster', isGcj02: true },
-  { id: 'satellite', name: '卫星', type: 'raster', isGcj02: false },
+  { id: 'satellite', name: '卫星', type: 'raster' },
 ]
 
 const PROTOMAPS_KEY = import.meta.env.VITE_PROTOMAPS_KEY ?? ''
@@ -114,7 +99,7 @@ const props = withDefaults(
     defaultZoom?: number
     /**
      * 默认底图。改为 'protomaps-light' —— 与公共站「地图检索」首屏一致的 Immich 浅色矢量风格，
-     * 视觉信息密度低、抽屉里看不刺眼。国内拍摄需要中文标注/对齐时可手动切到「普通」（高德）。
+     * 视觉信息密度低、抽屉里看不刺眼。可切换卫星底图核对地形。
      */
     defaultLayer?: LayerId
   }>(),
@@ -156,37 +141,17 @@ function getLayerDef(id: LayerId): LayerDef {
   return LAYER_DEFS.find(l => l.id === id) ?? LAYER_DEFS[0]
 }
 
-function isGcj02Active(): boolean {
-  const def = getLayerDef(activeLayer.value)
-  return def.type === 'raster' && def.isGcj02
-}
-
-// 存储策略：国内坐标以 GCJ-02 存储，境外坐标以 WGS-84 存储。
-// 读取时根据坐标是否在中国 + 当前底图决定是否需要转换。
+// Preserve the current storage convention; all remaining basemaps display WGS84.
 function toDisplayCoord(lat: number, lng: number): { lat: number; lng: number } {
-  const inChina = isInChina(lng, lat)
-  const gaodeActive = isGcj02Active()
-  if (inChina && !gaodeActive) {
-    const [wLng, wLat] = gcj02ToWgs84(lng, lat)
-    return { lat: wLat, lng: wLng }
-  }
-  if (!inChina && gaodeActive) {
-    const [gLng, gLat] = wgs84ToGcj02(lng, lat)
-    return { lat: gLat, lng: gLng }
-  }
-  return { lat, lng }
+  if (!isInChina(lng, lat)) return { lat, lng }
+  const [wLng, wLat] = gcj02ToWgs84(lng, lat)
+  return { lat: wLat, lng: wLng }
 }
 
-// 将地图返回的坐标转为存储格式（国内→GCJ-02，境外→WGS-84）
 function toStoreCoord(lat: number, lng: number): { lat: number; lng: number } {
-  if (isGcj02Active()) {
-    return { lat, lng }
-  }
-  if (isInChina(lng, lat)) {
-    const [gLng, gLat] = wgs84ToGcj02(lng, lat)
-    return { lat: gLat, lng: gLng }
-  }
-  return { lat, lng }
+  if (!isInChina(lng, lat)) return { lat, lng }
+  const [gLng, gLat] = wgs84ToGcj02(lng, lat)
+  return { lat: gLat, lng: gLng }
 }
 
 function syncInputsFromModel() {
@@ -240,30 +205,10 @@ async function loadVectorStyle(url: string): Promise<maplibregl.StyleSpecificati
   return JSON.parse(filled) as maplibregl.StyleSpecification
 }
 
-/**
- * 构造 raster 双件套（普通=高德 / 卫星=Esri）合成样式，根据 activeId 切换可见性。
- * 单一样式承载多套 source/layer 的好处：用 setLayoutProperty 切换 visibility 即可，
- * 不需要每次 setStyle 重建——保留 marker、避免闪烁。
- *
- * 「normal」按钮 UI 上叫「普通」，但瓦片源已替换为高德 webrd。原 OSM raster 在国内
- * 加载又慢、风格又和 protomaps 浅色重复，索性合并掉。
- */
-function buildRasterStyle(activeId: 'normal' | 'satellite'): maplibregl.StyleSpecification {
+function buildRasterStyle(): maplibregl.StyleSpecification {
   return {
     version: 8,
     sources: {
-      'normal-tiles': {
-        type: 'raster',
-        tiles: [
-          'http://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-          'http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-          'http://webrd03.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-          'http://webrd04.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
-        ],
-        tileSize: 256,
-        attribution: '© 高德地图',
-        maxzoom: 18
-      },
       'satellite-tiles': {
         type: 'raster',
         tiles: [
@@ -276,16 +221,9 @@ function buildRasterStyle(activeId: 'normal' | 'satellite'): maplibregl.StyleSpe
     },
     layers: [
       {
-        id: 'normal-layer',
-        type: 'raster',
-        source: 'normal-tiles',
-        layout: { visibility: activeId === 'normal' ? 'visible' : 'none' }
-      },
-      {
         id: 'satellite-layer',
         type: 'raster',
-        source: 'satellite-tiles',
-        layout: { visibility: activeId === 'satellite' ? 'visible' : 'none' }
+        source: 'satellite-tiles'
       }
     ]
   }
@@ -309,13 +247,12 @@ async function switchLayer(layerId: LayerId) {
   activeLayer.value = layerId
 
   if (newDef.type === 'raster' && oldDef.type === 'raster') {
-    map.setLayoutProperty('normal-layer', 'visibility', layerId === 'normal' ? 'visible' : 'none')
     map.setLayoutProperty('satellite-layer', 'visibility', layerId === 'satellite' ? 'visible' : 'none')
   } else if (newDef.type === 'vector') {
     const style = await loadVectorStyle(newDef.styleUrl)
     map.setStyle(style, { diff: false })
   } else {
-    map.setStyle(buildRasterStyle(newDef.id), { diff: false })
+    map.setStyle(buildRasterStyle(), { diff: false })
   }
 
   // 坐标系切换（GCJ-02 ↔ WGS-84）下，国内点的视觉位置会偏，需要重新设 marker
@@ -343,7 +280,7 @@ onMounted(async () => {
   const initialStyle: maplibregl.StyleSpecification =
     initialDef.type === 'vector'
       ? await loadVectorStyle(initialDef.styleUrl)
-      : buildRasterStyle(initialDef.id)
+      : buildRasterStyle()
 
   map = new maplibregl.Map({
     container: mapContainer.value,

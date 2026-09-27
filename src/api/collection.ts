@@ -1,6 +1,7 @@
 import request from "../utils/request";
 
 interface CollectionParams {
+    visibility?: 'private' | 'public';
     id: number;
     name: string;
     description: string;

@@ -98,7 +98,6 @@ const configDefinitions: ConfigDefinition[] = [
   { category: 'storage', categoryLabel: '对象存储', key: 'bucket', label: 'Bucket 名称', description: '上传、分片管理和删除操作使用的对象存储桶。', help: '必须与对象存储中实际创建的 Bucket 名称一致。', placeholder: 'albireo', valueType: 'string', encrypted: false, required: true },
   { category: 'storage', categoryLabel: '对象存储', key: 'custom_domain', label: '媒体 CDN 域名', description: '图片、视频和缩略图的公开访问域名，前端会使用它拼接媒体地址。', help: '例如 https://albireo.shuumatu.com，不要填写末尾路径。', placeholder: 'https://cdn.example.com', valueType: 'string', encrypted: false, required: true },
   { category: 'vision-ai', categoryLabel: '视觉 AI', key: 'active-model', label: '当前视觉 AI 模型', description: '选择视频分析任务使用的视觉模型，也可以在“视觉模型管理”页面切换。', help: '切换后只影响后续提交的分析任务。', placeholder: '选择视觉 AI 模型', valueType: 'string', encrypted: false, required: true },
-  { category: 'geocoding', categoryLabel: '地理编码', key: 'amap_key', label: '高德 Web 服务 API Key', description: '用于根据媒体 GPS 信息获取省市和地点名称。留空时自动跳过外部地理编码。', help: '可选配置；高德 Key 会使用 AES 加密存储。', placeholder: '填写高德 Web 服务 API Key（可选）', valueType: 'encrypted', encrypted: true, required: false },
 ]
 const modelOptions = [{ label: '智谱 Flash（免费）', value: 'zhipu' }, { label: '智谱 FlashX（付费）', value: 'zhipu-flashx' }, { label: 'Google Gemini', value: 'gemini' }, { label: 'Twelve Labs', value: 'twelvelabs' }]
 const booleanOptions = [{ label: '启用（true）', value: 'true' }, { label: '关闭（false）', value: 'false' }]
@@ -116,7 +115,7 @@ const secretVisible = ref(false)
 const editingDefinition = ref<ConfigDefinition | null>(null)
 const editingRow = ref<ConfigRow | null>(null)
 const form = reactive({ value: '' })
-const categoryOptions = [{ label: '全部配置', value: 'all' }, { label: '对象存储', value: 'storage' }, { label: '视觉 AI', value: 'vision-ai' }, { label: '地理编码', value: 'geocoding' }]
+const categoryOptions = [{ label: '全部配置', value: 'all' }, { label: '对象存储', value: 'storage' }, { label: '视觉 AI', value: 'vision-ai' }]
 const hasFilters = computed(() => selectedCategory.value !== 'all' || pendingOnly.value || !!searchKeyword.value.trim())
 const rows = computed<ConfigRow[]>(() => configDefinitions.map(definition => {
   const source = configs.value.find(item => item.category === definition.category && item.key === definition.key) ?? null

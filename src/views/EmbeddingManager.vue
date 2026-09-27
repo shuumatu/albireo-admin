@@ -1,11 +1,21 @@
 <template>
   <div class="scanner-app">
+    <div class="runtime-strip">
+      <div class="runtime-title"><span class="runtime-dot" :class="runtimeDotClass"></span><strong>Sidecar 运行时</strong><span>{{ runtimeLabel }}</span><code v-if="runtime?.pid">PID {{ runtime.pid }}</code></div>
+      <div class="runtime-meta"><span v-if="runtime?.health?.model">{{ runtime.health.model }} · {{ runtime.health.dim }}d</span><span v-if="runtime?.lastError" class="runtime-error">{{ runtime.lastError }}</span></div>
+      <div class="runtime-actions">
+        <n-button v-if="runtime?.local && !runtime?.running && !runtime?.adoptedExternal && !runtime?.waitingForPort" size="tiny" type="primary" :loading="runtimeLoading" @click="controlRuntime('start')">启动</n-button>
+        <n-button v-else-if="runtime?.local && runtime?.running && !runtime?.adoptedExternal" size="tiny" secondary :loading="runtimeLoading" @click="controlRuntime('restart')">重启</n-button>
+        <n-button v-if="runtime?.local && runtime?.running && !runtime?.adoptedExternal" size="tiny" type="error" secondary :loading="runtimeLoading" @click="controlRuntime('stop')">停止</n-button>
+        <n-button size="tiny" quaternary :loading="runtimeLoading" @click="refreshRuntime">刷新</n-button>
+      </div>
+    </div>
     <!-- =======================  扫描器主窗口  ======================= -->
     <div class="scanner-window">
       <!-- 标题栏 -->
       <div class="window-titlebar">
         <span class="title-icon">▦</span>
-        <span class="title-text">向量嵌入状态视图</span>
+        <span class="title-text">媒体嵌入监控</span>
         <span class="title-sep">·</span>
         <span class="title-sub">{{ heatmapMediaType === 'image' ? '图片库' : '视频库' }}</span>
         <span class="title-spacer"></span>
@@ -46,16 +56,24 @@
         </div>
       </div>
 
+      <div class="overview-strip">
+        <div class="overview-item"><span class="overview-k">图片覆盖率</span><strong>{{ coverage(overview?.images) }}%</strong><small>{{ formatNumber(overview?.images?.pending) }} 待处理</small></div>
+        <div class="overview-item"><span class="overview-k">视频覆盖率</span><strong>{{ coverage(overview?.videos) }}%</strong><small>{{ formatNumber(overview?.videos?.pending) }} 待处理</small></div>
+        <div class="overview-item"><span class="overview-k">正在处理</span><strong class="is-blue">{{ overview?.running ?? 0 }}</strong><small>实时任务</small></div>
+        <div class="overview-item"><span class="overview-k">最近失败</span><strong class="is-red">{{ overview?.recentFailed ?? 0 }}</strong><small>保留 60 秒</small></div>
+        <div class="overview-model"><span>模型校准</span><n-tag v-if="calibration?.enabled" type="success" size="small">已启用</n-tag><n-tag v-else type="warning" size="small">未启用</n-tag><span class="model-name">{{ calibration?.model || 'sidecar 未连接' }}</span><n-button size="tiny" secondary @click="refreshCalibration">刷新</n-button><n-button size="tiny" type="warning" secondary :loading="calibrating" @click="recalculate">重算</n-button></div>
+      </div>
+
       <!-- 状态栏 -->
       <div class="window-status">
         <span class="status-dot" :class="{ 'is-busy': heatmapLoading }"></span>
-        <span class="status-label">嵌入状态</span>
+        <span class="status-label">数据状态</span>
         <span class="status-sep">:</span>
         <span class="status-main">
           <template v-if="heatmapLoading">正在加载嵌入数据…</template>
           <template v-else-if="hoverInfo">{{ hoverInfo }}</template>
           <template v-else-if="heatmapPoints.length > 0">
-            就绪 · 共 {{ formatNumber(heatmapPoints.length) }} 个样本
+            就绪 · 已加载 {{ formatNumber(heatmapPoints.length) }} 个媒体
             <span v-if="lastRefreshAt" class="status-time">· 最近刷新 {{ lastRefreshAt }}</span>
           </template>
           <template v-else>等待加载数据…</template>
@@ -81,7 +99,7 @@
           </div>
           <div v-if="heatmapPoints.length === 0 && !heatmapLoading" class="canvas-empty">
             <div class="empty-title">暂无数据</div>
-            <div class="empty-sub">点击下方 [刷新数据] 加载嵌入状态</div>
+            <div class="empty-sub">点击下方“刷新统计与分布”加载媒体状态</div>
           </div>
         </div>
 
@@ -149,10 +167,10 @@
           :loading="heatmapLoading"
           @click="refreshStatsAndHeatmap"
         >
-          刷新数据
+          刷新统计与分布
         </n-button>
         <n-button size="small" @click="loadHeatmap" :loading="heatmapLoading">
-          仅刷新画布
+          刷新分布图
         </n-button>
 
         <span class="actions-spacer"></span>
@@ -200,7 +218,7 @@
             title="清空向量并立即向 sidecar 投递一条嵌入任务（不再依赖定时回填）"
             @click="onCellRetry"
           >
-            立即重新嵌入
+            重新嵌入
           </n-button>
           <n-button size="tiny" @click="onCellCopyId">复制 ID</n-button>
           <n-button size="tiny" @click="onCellLocateInList">在明细中查看</n-button>
@@ -208,21 +226,22 @@
       </div>
     </div>
 
-    <!-- =====================  问题样本明细列表  ===================== -->
-    <n-card title="问题样本明细" class="list-card" size="small">
+    <!-- =====================  媒体嵌入清单  ===================== -->
+    <n-card title="媒体嵌入清单" class="list-card" size="small">
       <n-flex :size="12" wrap align="center" style="margin-bottom: 12px">
-        <span class="label">媒体类型</span>
+        <span class="label">媒体</span>
         <n-radio-group v-model:value="mediaType" size="small">
           <n-radio-button value="image">图片</n-radio-button>
           <n-radio-button value="video">视频</n-radio-button>
         </n-radio-group>
-        <span class="label">来源筛选</span>
+        <span class="label">处理状态</span>
         <n-radio-group v-model:value="sourceFilter" size="small">
-          <n-radio-button :value="0">0 主路径</n-radio-button>
-          <n-radio-button :value="1">1 封面兜底</n-radio-button>
-          <n-radio-button :value="2">2 未嵌入</n-radio-button>
+          <n-radio-button :value="2">待嵌入（{{ formatNumber(selectedListStats?.pending) }}）</n-radio-button>
+          <n-radio-button :value="1">封面兜底（{{ formatNumber(selectedListStats?.coverDone) }}）</n-radio-button>
+          <n-radio-button :value="0">主路径完成（{{ formatNumber(selectedListStats?.fullDone) }}）</n-radio-button>
         </n-radio-group>
         <n-button size="small" @click="loadList" :loading="listLoading">查询</n-button>
+        <n-button size="small" type="primary" secondary :disabled="!rows.length" :loading="batchRetryLoading" @click="retryCurrentBatch">批量重新嵌入</n-button>
       </n-flex>
 
       <n-data-table
@@ -232,19 +251,26 @@
         :pagination="false"
         size="small"
         :scroll-x="720"
-      />
+      >
+        <template #empty>
+          <div class="table-empty">
+            <strong>{{ sourceFilter === 2 ? '当前没有待嵌入媒体' : '当前筛选没有媒体' }}</strong>
+            <span>{{ sourceFilter === 2 ? '所有已完成媒体都已有向量，或媒体仍在上传/处理中。' : '可切换媒体类型或处理状态查看其它记录。' }}</span>
+          </div>
+        </template>
+      </n-data-table>
 
-      <n-alert type="info" title="色卡说明（与画布一致）" style="margin-top: 14px">
+      <n-alert type="info" title="处理状态说明" style="margin-top: 14px">
         <ul class="explain">
-          <li><span class="dot" :style="{ background: HEAT_COLORS[0] }"></span><strong>主路径</strong>：embedding 已写入（embedding_source = 0）</li>
-          <li><span class="dot" :style="{ background: HEAT_COLORS[1] }"></span><strong>封面兜底</strong>：embedding 已写入（embedding_source = 1，检索质量略弱）</li>
-          <li><span class="dot" :style="{ background: HEAT_COLORS[2] }"></span><strong>待嵌入</strong>：尚无向量。本系统已停用定时回填，请在画布上点击格子「立即重新嵌入」或本表行内「重试」按钮手动触发；<code>embedding_attempts</code> 反映已失败次数</li>
+          <li><span class="dot" :style="{ background: HEAT_COLORS[0] }"></span><strong>主路径完成</strong>：已使用视频帧或原图生成向量。</li>
+          <li><span class="dot" :style="{ background: HEAT_COLORS[1] }"></span><strong>封面兜底</strong>：主媒体处理失败后使用封面生成，检索质量可能较弱。</li>
+          <li><span class="dot" :style="{ background: HEAT_COLORS[2] }"></span><strong>待嵌入</strong>：当前没有向量。可点击行内“重新嵌入”，任务会立即入队。</li>
         </ul>
       </n-alert>
     </n-card>
 
     <!-- 右下悬浮：实时处理面板（自带 2s 轮询，无任务时自动隐藏，组件内 Teleport 到 body） -->
-    <EmbeddingInFlightPanel />
+    <EmbeddingInFlightPanel @locate="onLocateTask" />
   </div>
 </template>
 
@@ -253,11 +279,19 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'v
 import type { DataTableColumns } from 'naive-ui'
 import { NButton, useMessage } from 'naive-ui'
 import {
+  getEmbeddingOverview,
+  getEmbeddingCalibration,
+  getEmbeddingRuntime,
+  startEmbeddingRuntime,
+  stopEmbeddingRuntime,
+  restartEmbeddingRuntime,
   getEmbeddingHeatmap,
   getEmbeddingProgress,
   getEmbeddingSourceStats,
   listEmbeddingRows,
   retryEmbedding,
+  retryEmbeddingBatch,
+  recalculateEmbeddingCalibration,
   retranscodeVideo,
   type EmbeddingAdminRow,
   type EmbeddingProgressEnvelope,
@@ -265,6 +299,8 @@ import {
   type HeatmapTier
 } from '../api/embedding'
 import EmbeddingInFlightPanel from '../components/EmbeddingInFlightPanel.vue'
+import { toMediumUrl } from './image/composables/imageFormat'
+import { getPublicSiteOrigin } from './video/composables/videoFormat'
 
 const message = useMessage()
 
@@ -277,15 +313,15 @@ const HEAT_COLORS = [
 ] as const
 
 const TIER_LABELS: Record<HeatmapTier, string> = {
-  0: '主路径',
+  0: '主路径完成',
   1: '封面兜底',
   2: '待嵌入'
 }
 
 const TIER_TIPS: Record<HeatmapTier, string> = {
-  0: '主路径已嵌入（embedding_source=0）',
+  0: '已通过视频帧或原图完成嵌入',
   1: '封面兜底已嵌入（embedding_source=1，检索质量略弱）',
-  2: '待嵌入，等待回填'
+  2: '当前没有向量，可从清单重新嵌入'
 }
 
 // 单元格自适应：cellPx 在 [HEAT_CELL_MIN, HEAT_CELL_MAX] 之间
@@ -302,10 +338,21 @@ const listLoading = ref(false)
 const heatmapLoading = ref(false)
 const progress = ref<EmbeddingProgressEnvelope | null>(null)
 const stats = ref<EmbeddingSourceStatsEnvelope | null>(null)
+const overview = ref<any>(null)
+const calibration = ref<Record<string, any> | null>(null)
+const calibrating = ref(false)
+const batchRetryLoading = ref(false)
+const runtime = ref<any>(null)
+const runtimeLoading = ref(false)
+let runtimeTimer: ReturnType<typeof setInterval> | null = null
 const rows = ref<EmbeddingAdminRow[]>([])
 const mediaType = ref<'image' | 'video'>('video')
 const heatmapMediaType = ref<'image' | 'video'>('video')
 const sourceFilter = ref<0 | 1 | 2>(2)
+
+const selectedListStats = computed(() => (
+  mediaType.value === 'image' ? stats.value?.images : stats.value?.videos
+))
 
 type HeatmapPoint = { id: number; v: HeatmapTier }
 const heatmapPoints = ref<HeatmapPoint[]>([])
@@ -388,10 +435,66 @@ const healthClass = computed(() => {
   return 'is-bad'
 })
 
+const runtimeLabel = computed(() => {
+  if (!runtime.value) return '检测中'
+  if (!runtime.value.local) return '外部托管'
+  if (runtime.value.adoptedExternal) {
+    return runtime.value.health?.loaded ? '已有实例 · 就绪' : '已有实例 · 加载中'
+  }
+  if (runtime.value.waitingForPort) return '等待端口释放'
+  if (!runtime.value.running) return '已停止'
+  if (runtime.value.health?.loaded) return '就绪'
+  return '启动中 / 模型加载中'
+})
+
+const runtimeDotClass = computed(() => ({
+  'is-ready': runtimeLabel.value === '就绪' || runtimeLabel.value === '已有实例 · 就绪',
+  'is-busy': runtimeLabel.value === '启动中 / 模型加载中' || runtimeLabel.value === '已有实例 · 加载中' || runtimeLabel.value === '等待端口释放',
+  'is-error': runtimeLabel.value === '已停止'
+}))
+
 // ───────────────────────── 工具函数 ─────────────────────────
 function formatNumber(n: number | null | undefined): string {
   if (n == null) return '0'
   return n.toLocaleString('en-US')
+}
+
+function coverage(s: any): number {
+  if (!s?.total) return 0
+  return Math.round(((s.total - (s.pending || 0)) / s.total) * 1000) / 10
+}
+
+async function refreshCalibration() {
+  try { calibration.value = await getEmbeddingCalibration() as any } catch { calibration.value = { enabled: false } }
+}
+
+async function refreshRuntime() {
+  try { runtime.value = await getEmbeddingRuntime() as any }
+  catch { runtime.value = { local: true, running: false, lastError: '无法连接 metadata-service' } }
+}
+
+async function controlRuntime(action: 'start' | 'stop' | 'restart') {
+  if (action !== 'start' && !window.confirm(`${action === 'stop' ? '停止' : '重启'} sidecar 可能中断正在处理的任务，确定继续吗？`)) return
+  runtimeLoading.value = true
+  try {
+    const fn = action === 'start' ? startEmbeddingRuntime : action === 'stop' ? stopEmbeddingRuntime : restartEmbeddingRuntime
+    runtime.value = await fn() as any
+    message.success(action === 'start' ? 'sidecar 启动命令已发送' : action === 'stop' ? 'sidecar 已停止' : 'sidecar 重启命令已发送')
+    window.setTimeout(refreshRuntime, 1500)
+  } catch (e: any) { message.error('运行时操作失败：' + (e?.message ?? e)); await refreshRuntime() }
+  finally { runtimeLoading.value = false }
+}
+
+async function recalculate() {
+  if (calibrating.value) return
+  if (!window.confirm('重算校准会改变后续向量空间，旧向量需要重新嵌入。确定继续吗？')) return
+  calibrating.value = true
+  try {
+    const result: any = await recalculateEmbeddingCalibration()
+    if (result?.ok) { message.success('校准完成，请按需重建旧向量'); await refreshCalibration() }
+    else message.error(result?.error || '校准失败')
+  } catch (e: any) { message.error('校准失败：' + (e?.message ?? e)) }
+  finally { calibrating.value = false }
 }
 
 function pad2(n: number) {
@@ -572,7 +675,7 @@ async function onCellRetry() {
       await Promise.all([loadAll(), loadHeatmap()])
     } else if (affected > 0) {
       // reset 成功了但没投出去（多半是缺 url / 视频未转码完成 / MQ 暂时不可达）
-      message.warning(`已清空向量但未能立即投递 id=${sel.id}（可能缺 url / 视频未转码完成 / MQ 不可达），稍后再点一次「立即重新嵌入」`)
+      message.warning(`已清空向量但未能立即投递 id=${sel.id}（可能缺 URL、视频未转码完成或 MQ 不可达），稍后再点一次“重新嵌入”`)
       await Promise.all([loadAll(), loadHeatmap()])
     } else {
       message.warning('未更新行（id 是否仍存在于库中？）')
@@ -676,14 +779,27 @@ async function loadHeatmap() {
 async function loadAll() {
   loading.value = true
   try {
-    const [p, s] = await Promise.all([getEmbeddingProgress(), getEmbeddingSourceStats()])
+    const [p, s, o] = await Promise.all([getEmbeddingProgress(), getEmbeddingSourceStats(), getEmbeddingOverview()])
     progress.value = p as any
     stats.value = s as any
+    overview.value = o as any
   } catch (e: any) {
     message.error('加载统计失败：' + (e?.message ?? e))
   } finally {
     loading.value = false
   }
+}
+
+async function retryCurrentBatch() {
+  if (!rows.value.length) return
+  if (!window.confirm(`将清空当前结果中的 ${rows.value.length} 条向量并重新投递，确定继续吗？`)) return
+  batchRetryLoading.value = true
+  try {
+    const result: any = await retryEmbeddingBatch(mediaType.value, rows.value.map(r => r.id))
+    message.success(`已接受 ${result?.accepted ?? 0} 条，已入队 ${result?.enqueued ?? 0} 条`)
+    await Promise.all([loadAll(), loadList(), loadHeatmap()])
+  } catch (e: any) { message.error('批量重试失败：' + (e?.message ?? e)) }
+  finally { batchRetryLoading.value = false }
 }
 
 async function loadList() {
@@ -732,14 +848,79 @@ async function onRetranscode(row: EmbeddingAdminRow) {
   }
 }
 
+function rowTitle(row: EmbeddingAdminRow): string {
+  return row.title?.trim() || row.fileName?.trim() || `${mediaType.value === 'video' ? '视频' : '图片'} #${row.id}`
+}
+
+function openMedia(row: EmbeddingAdminRow) {
+  if (!row.uuid) {
+    message.warning('该媒体没有详情页标识（UUID）')
+    return
+  }
+  const origin = getPublicSiteOrigin()
+  const kind = mediaType.value === 'video' ? 'video' : 'image'
+  window.open(`${origin}/${kind}/${encodeURIComponent(row.uuid)}`, '_blank', 'noopener,noreferrer')
+}
+
+function previewUrl(row: EmbeddingAdminRow): string {
+  return toMediumUrl(row.previewUrl)
+}
+
+function onPreviewError(event: Event, row: EmbeddingAdminRow) {
+  const image = event.currentTarget as HTMLImageElement | null
+  if (!image) return
+  // medium/thumb 资源可能还没生成，先回退到后端返回的原始 URL；
+  // 原图也不可用时隐藏图片，保留可识别的媒体底色和标题。
+  if (row.previewUrl && image.dataset.fallbackApplied !== 'true') {
+    image.dataset.fallbackApplied = 'true'
+    image.src = row.previewUrl
+    return
+  }
+  image.style.display = 'none'
+}
+
+async function onLocateTask(task: { mediaType: 'image' | 'video'; mediaId: number }) {
+  mediaType.value = task.mediaType
+  sourceFilter.value = 2
+  await loadList()
+  await nextTick()
+  document.querySelector('.list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
-  { title: 'ID', key: 'id', width: 80 },
-  { title: 'hash', key: 'hash', ellipsis: { tooltip: true }, width: 200 },
   {
-    title: 'source',
+    title: '媒体',
+    key: 'media',
+    minWidth: 290,
+    render: (row) => h('div', { class: 'media-cell' }, [
+      h('button', {
+        class: 'media-thumb-button',
+        type: 'button',
+        title: '打开媒体详情',
+        onClick: () => openMedia(row)
+      }, [row.previewUrl
+        ? h('img', {
+          class: 'media-thumb',
+          src: previewUrl(row),
+          alt: rowTitle(row),
+          loading: 'lazy',
+          onError: (event: Event) => onPreviewError(event, row)
+        })
+        : h('span', { class: 'media-thumb-placeholder' }, mediaType.value === 'video' ? 'VIDEO' : 'IMAGE')]),
+      h('div', { class: 'media-copy' }, [
+        h('button', { class: 'media-title', type: 'button', title: '打开媒体详情', onClick: () => openMedia(row) }, rowTitle(row)),
+        h('div', { class: 'media-meta' }, [
+          `${mediaType.value === 'video' ? '视频' : '图片'} · ID ${row.id}`,
+          row.hash ? ` · ${row.hash.slice(0, 12)}` : ''
+        ])
+      ])
+    ])
+  },
+  {
+    title: '处理结果',
     key: 'embeddingSource',
-    width: 72,
-    render: (r) => String(r.embeddingSource ?? '—')
+    width: 110,
+    render: (r) => r.embeddingSource === 1 ? '封面兜底' : r.embeddingSource === 0 || r.embeddingSource == null ? '主路径完成' : '待嵌入'
   },
   {
     title: '失败次数',
@@ -756,12 +937,17 @@ const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
         h(
           NButton,
           { size: 'tiny', type: 'primary', secondary: true, onClick: () => onRetry(row) },
-          { default: () => '重试' }
+          { default: () => '重新嵌入' }
         )
       ]
       if (mediaType.value === 'video') {
         btns.push(
           h(NButton, { size: 'tiny', onClick: () => onRetranscode(row) }, { default: () => '重转码' })
+        )
+      }
+      if (row.uuid) {
+        btns.push(
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openMedia(row) }, { default: () => '查看详情' })
         )
       }
       return h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, btns)
@@ -806,10 +992,17 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('mousedown', onDocClick)
   await refreshStatsAndHeatmap()
+  await refreshRuntime()
+  runtimeTimer = setInterval(refreshRuntime, 5000)
+  await refreshCalibration()
   loadList()
 })
 
 onBeforeUnmount(() => {
+  if (runtimeTimer) {
+    clearInterval(runtimeTimer)
+    runtimeTimer = null
+  }
   stopAutoRefresh()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('mousedown', onDocClick)
@@ -884,6 +1077,58 @@ onBeforeUnmount(() => {
   padding: 8px 14px;
   background: #fffbe8;
   border-bottom: 1px solid #e6dcc4;
+}
+
+.overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) minmax(260px, 2fr);
+  gap: 1px;
+  background: #d8d8d8;
+  border-bottom: 1px solid #d0d0d0;
+}
+.runtime-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 42px;
+  padding: 6px 14px;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 12px;
+}
+.runtime-title, .runtime-meta, .runtime-actions { display: flex; align-items: center; gap: 8px; }
+.runtime-title strong { color: #fff; }
+.runtime-title code { color: #9ca3af; font-family: ui-monospace, monospace; }
+.runtime-meta { flex: 1; color: #9ca3af; min-width: 0; }
+.runtime-error { color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
+.runtime-dot.is-ready { background: #22c55e; }
+.runtime-dot.is-busy { background: #f59e0b; animation: runtime-pulse 1.4s ease-in-out infinite; }
+.runtime-dot.is-error { background: #ef4444; }
+@keyframes runtime-pulse { 50% { opacity: .45; } }
+@media (max-width: 700px) {
+  .runtime-strip { flex-wrap: wrap; }
+  .runtime-meta { flex-basis: 100%; order: 3; }
+}
+.overview-item, .overview-model {
+  min-height: 58px;
+  padding: 9px 12px;
+  background: #fff;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.overview-item { flex-wrap: wrap; }
+.overview-k { color: #6b7280; font-size: 11px; width: 100%; }
+.overview-item strong { font-size: 20px; line-height: 1; color: #15803d; font-family: ui-monospace, monospace; }
+.overview-item strong.is-blue { color: #2563eb; }
+.overview-item strong.is-red { color: #dc2626; }
+.overview-item small { color: #6b7280; font-size: 11px; }
+.overview-model { align-items: center; flex-wrap: wrap; color: #4b5563; font-size: 12px; }
+.model-name { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; color: #374151; }
+@media (max-width: 900px) {
+  .overview-strip { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .overview-model { grid-column: 1 / -1; }
 }
 .tb-row {
   display: flex;
@@ -1305,6 +1550,86 @@ onBeforeUnmount(() => {
    ========================================================== */
 .list-card {
   margin-top: 8px;
+}
+.media-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.media-thumb-button {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #eef0f3;
+}
+.media-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.media-thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #7b8491;
+  font-size: 9px;
+  font-weight: 700;
+}
+.media-copy {
+  min-width: 0;
+}
+.media-title {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #222;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.media-title:hover {
+  color: #2f7d4a;
+  text-decoration: underline;
+}
+.media-meta {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #7a7a7a;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 24px 12px;
+  color: #6b7280;
+  text-align: center;
+}
+.table-empty strong {
+  color: #374151;
+  font-size: 13px;
+}
+.table-empty span {
+  font-size: 12px;
 }
 .label {
   font-size: 13px;

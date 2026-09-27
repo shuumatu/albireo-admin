@@ -124,6 +124,14 @@
             </n-radio-group>
           </div>
           <div class="field">
+            <label>可见性</label>
+            <n-radio-group :value="form.visibility" @update:value="onVisibilityChange">
+              <n-radio value="private">私密</n-radio>
+              <n-radio value="public">公开</n-radio>
+            </n-radio-group>
+            <p class="hint">公开后，处理完成的照片可被访客浏览；私密内容仅管理员或有效分享可访问。</p>
+          </div>
+          <div class="field">
             <label>拍摄时间</label>
             <n-date-picker
               :value="shotAtMs"
@@ -259,13 +267,14 @@ const emit = defineEmits<{
 const message = useMessage()
 
 interface LocalForm {
+  visibility: 'private' | 'public'
   title: string | null
   description: string | null
   type: string | null
   shotAt: string | null
 }
-const form = ref<LocalForm>({ title: null, description: null, type: null, shotAt: null })
-const initialForm = ref<LocalForm>({ title: null, description: null, type: null, shotAt: null })
+const form = ref<LocalForm>({ visibility: 'private', title: null, description: null, type: null, shotAt: null })
+const initialForm = ref<LocalForm>({ visibility: 'private', title: null, description: null, type: null, shotAt: null })
 
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const saveError = ref('')
@@ -321,6 +330,7 @@ watch(
     if (!show || !props.image) return
     const v = props.image
     form.value = {
+      visibility: v.visibility ?? 'private',
       title: v.title ?? '',
       description: v.description ?? '',
       type: v.type ?? 'photo',
@@ -386,6 +396,11 @@ function flushDescription() {
   saveField({ description: form.value.description })
 }
 
+function onVisibilityChange(value: 'private' | 'public') {
+  form.value.visibility = value
+  saveField({ visibility: value })
+}
+
 function onTypeChange(v: string) {
   form.value.type = v
   if (v === initialForm.value.type) return
@@ -409,6 +424,7 @@ async function saveField(patch: Partial<LocalForm>) {
   saveError.value = ''
   try {
     await updateImage(id, {
+      visibility: patch.visibility,
       title: patch.title ?? undefined,
       description: patch.description ?? undefined,
       type: patch.type ?? undefined,
@@ -418,6 +434,7 @@ async function saveField(patch: Partial<LocalForm>) {
     saveStatus.value = 'saved'
     savedAt.value = new Date()
     emit('patched', id, {
+      visibility: form.value.visibility,
       title: form.value.title,
       description: form.value.description,
       type: form.value.type ?? undefined,
