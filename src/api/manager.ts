@@ -65,6 +65,8 @@ export interface VideoItem {
   shotAt: string | null
   fileName: string
   objectKey: string
+  sourceUrl?: string | null
+  videoVersions?: { resolution: string; status: string; url?: string | null }[]
   presignUrl: string
   videoUrl: string
   coverUrl: string | null
@@ -100,6 +102,9 @@ interface CollectionWithCoverResponse {
   description: string;
   createdAt: string;
   imageUrl: string;
+  displayUrl?: string;
+  mediumUrl?: string;
+  thumbnailUrl?: string;
 }
 
 

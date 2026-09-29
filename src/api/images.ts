@@ -39,6 +39,9 @@ export interface ImageItem {
   uuid: string;
   fileName: string;
   imageUrl: string;
+  displayUrl?: string;
+  mediumUrl?: string;
+  thumbnailUrl?: string;
   title: string | null;
   description: string | null;
   type: string;

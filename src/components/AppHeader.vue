@@ -4,7 +4,7 @@
     <div class="logo">
       <router-link to="/">
         <img
-          src="https://albireo.shuumatu.com/uploads/0e84dd80119bbfc52609e5e4fda0b57.png"
+          :src="albireoLogo"
           alt="Logo"
         />
       </router-link>
@@ -37,6 +37,7 @@
 </template>
 
 <script setup lang="ts">
+import albireoLogo from '../assets/albireo-logo.png'
 import { ref, watch, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NIcon, useDialog } from 'naive-ui'

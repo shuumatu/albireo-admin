@@ -124,7 +124,7 @@ const customUpload = async ({ file }: { file: any }) => {
 
     if (init.alreadyExists && init.url || init.directUpload && init.url) {
       console.log('直传模式:', init.url)
-      const resp = await fetch(init.url, { method: 'PUT', body: actualFile })
+      const resp = await fetch(init.url, { method: 'PUT', body: actualFile, headers: init.headers })
       if (!resp.ok) throw new Error('直接上传失败')
       await completeDirectUpload({ fileHash, objectKey: init.key, fileType })
       message.success('上传成功')

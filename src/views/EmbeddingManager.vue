@@ -1,5 +1,6 @@
 <template>
   <div class="scanner-app">
+    <EmbeddingSpacePanel />
     <div class="runtime-strip">
       <div class="runtime-title"><span class="runtime-dot" :class="runtimeDotClass"></span><strong>Sidecar 运行时</strong><span>{{ runtimeLabel }}</span><code v-if="runtime?.pid">PID {{ runtime.pid }}</code></div>
       <div class="runtime-meta"><span v-if="runtime?.health?.model">{{ runtime.health.model }} · {{ runtime.health.dim }}d</span><span v-if="runtime?.lastError" class="runtime-error">{{ runtime.lastError }}</span></div>
@@ -15,7 +16,7 @@
       <!-- 标题栏 -->
       <div class="window-titlebar">
         <span class="title-icon">▦</span>
-        <span class="title-text">媒体嵌入监控</span>
+        <span class="title-text">历史向量记录</span>
         <span class="title-sep">·</span>
         <span class="title-sub">{{ heatmapMediaType === 'image' ? '图片库' : '视频库' }}</span>
         <span class="title-spacer"></span>
@@ -57,8 +58,8 @@
       </div>
 
       <div class="overview-strip">
-        <div class="overview-item"><span class="overview-k">图片覆盖率</span><strong>{{ coverage(overview?.images) }}%</strong><small>{{ formatNumber(overview?.images?.pending) }} 待处理</small></div>
-        <div class="overview-item"><span class="overview-k">视频覆盖率</span><strong>{{ coverage(overview?.videos) }}%</strong><small>{{ formatNumber(overview?.videos?.pending) }} 待处理</small></div>
+        <div class="overview-item"><span class="overview-k">历史图片覆盖率</span><strong>{{ coverage(overview?.images) }}%</strong><small>{{ formatNumber(overview?.images?.pending) }} 待处理</small></div>
+        <div class="overview-item"><span class="overview-k">历史视频覆盖率</span><strong>{{ coverage(overview?.videos) }}%</strong><small>{{ formatNumber(overview?.videos?.pending) }} 待处理</small></div>
         <div class="overview-item"><span class="overview-k">正在处理</span><strong class="is-blue">{{ overview?.running ?? 0 }}</strong><small>实时任务</small></div>
         <div class="overview-item"><span class="overview-k">最近失败</span><strong class="is-red">{{ overview?.recentFailed ?? 0 }}</strong><small>保留 60 秒</small></div>
         <div class="overview-model"><span>模型校准</span><n-tag v-if="calibration?.enabled" type="success" size="small">已启用</n-tag><n-tag v-else type="warning" size="small">未启用</n-tag><span class="model-name">{{ calibration?.model || 'sidecar 未连接' }}</span><n-button size="tiny" secondary @click="refreshCalibration">刷新</n-button><n-button size="tiny" type="warning" secondary :loading="calibrating" @click="recalculate">重算</n-button></div>
@@ -275,6 +276,7 @@
 </template>
 
 <script setup lang="ts">
+import EmbeddingSpacePanel from '../components/EmbeddingSpacePanel.vue'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DataTableColumns } from 'naive-ui'
 import { NButton, useMessage } from 'naive-ui'
@@ -299,7 +301,6 @@ import {
   type HeatmapTier
 } from '../api/embedding'
 import EmbeddingInFlightPanel from '../components/EmbeddingInFlightPanel.vue'
-import { toMediumUrl } from './image/composables/imageFormat'
 import { getPublicSiteOrigin } from './video/composables/videoFormat'
 
 const message = useMessage()
@@ -863,7 +864,7 @@ function openMedia(row: EmbeddingAdminRow) {
 }
 
 function previewUrl(row: EmbeddingAdminRow): string {
-  return toMediumUrl(row.previewUrl)
+  return row.previewUrl ?? ''
 }
 
 function onPreviewError(event: Event, row: EmbeddingAdminRow) {

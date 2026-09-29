@@ -116,7 +116,6 @@ import { computed, h, ref } from 'vue'
 import { NCheckbox, NButton, NDropdown, NTag } from 'naive-ui'
 import ImageStatusOverlay from './ImageStatusOverlay.vue'
 import {
-  toMediumUrl,
   imageTypeLabel,
   imageTypeTagType,
   imageNeedsAttention,
@@ -143,7 +142,7 @@ const coverFailed = ref(false)
 
 const title = computed(() => props.image.title || props.image.fileName || '未命名图片')
 const extension = computed(() => fileExtensionUpper(props.image.fileName))
-const cover = computed(() => toMediumUrl(props.image.imageUrl))
+const cover = computed(() => props.image.mediumUrl || props.image.thumbnailUrl || props.image.imageUrl)
 const relTime = computed(() => formatRelative(props.image.createdAt))
 const typeText = computed(() => imageTypeLabel(props.image.type))
 const typeTag = computed(() => imageTypeTagType(props.image.type))

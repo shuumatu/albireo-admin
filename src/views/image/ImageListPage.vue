@@ -199,7 +199,6 @@ import ImageListRow from './ImageListRow.vue'
 import ImageFloatingActionBar from './ImageFloatingActionBar.vue'
 import ImageEditDrawer from './ImageEditDrawer.vue'
 import ShareDialog from '../../components/share/ShareDialog.vue'
-import { toMediumUrl } from './composables/imageFormat'
 import { useImageQuery } from './composables/useImageQuery'
 import { useImageSelection } from './composables/useImageSelection'
 // 公共站 origin 算法与视频侧共用，跨页面体验一致；图片详情路径是 /image/{uuid}
@@ -457,7 +456,7 @@ function openShareDialog(image: ImageItem) {
     targetType: 'image',
     targetId: image.id,
     name: image.title || image.fileName || `图片 #${image.id}`,
-    coverUrl: image.imageUrl ? toMediumUrl(image.imageUrl) : null,
+    coverUrl: image.mediumUrl || image.thumbnailUrl || image.imageUrl || null,
   }
   shareDialogShow.value = true
 }

@@ -3,7 +3,7 @@
  *
  * 与视频侧的 videoFormat 区别：
  *  - 图片有自己的业务类型 photo / cover / other 标签；
- *  - 缩略图 / 中等尺寸 url 是从 R2 上 raw 路径派生的固定路径，需要这套替换函数；
+ *  - 文件地址直接使用服务端返回的已登记版本；
  *  - 时间格式 / 文件后缀 / 失败状态判定逻辑直接复用 videoFormat，避免重复。
  */
 
@@ -13,25 +13,6 @@ export {
   formatRelative,
   fileExtensionUpper,
 } from '../../video/composables/videoFormat'
-
-/**
- * 把 raw 原图路径替换为 medium 缩略图。
- * R2 约定：`https://cdn/.../images/{hash}/raw/{file}` → `.../images/{hash}/medium/medium.jpg`。
- * 与原 ImageManager.vue#L744 行为保持一致；非 raw 路径或非 R2 url 直接返回原值。
- */
-export function toMediumUrl(url: string | null | undefined): string {
-  if (!url) return ''
-  return url.replace(/\/raw\/[^/]+$/, '/medium/medium.jpg')
-}
-
-/**
- * 缩略图（更小尺寸）。当前 R2 约定有 thumb/thumb.jpg 但部分 worker 还在生成中——
- * 失败时会回退到 medium，不会让 <img> 出现裂图。
- */
-export function toThumbUrl(url: string | null | undefined): string {
-  if (!url) return ''
-  return url.replace(/\/raw\/[^/]+$/, '/thumb/thumb.jpg')
-}
 
 /** 业务类型中文标签 */
 export function imageTypeLabel(t: string | null | undefined): string {

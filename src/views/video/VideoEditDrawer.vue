@@ -241,12 +241,9 @@ import type { VideoItem } from '../../api/manager'
 import {
   formatDuration,
   formatBytes,
-  getCoverPickerCandidates,
 } from './composables/videoFormat'
-import { useCdnDomain, normalizeCdnOrigin } from './composables/useCdnDomain'
 import { useVideoThemeVars } from './composables/useVideoThemeVars'
 
-const cdnDomain = useCdnDomain()
 const themeCssVars = useVideoThemeVars()
 import { updateVideo } from '../../api/manager'
 import { fetchTagsWithVideoId, addTagsToVideo, removeTagsFromVideo, fetchTags, createTag } from '../../api/tags'
@@ -306,17 +303,11 @@ const collectionOptions = computed(() =>
 // 位置（懒加载）
 const locationModel = ref<{ lat: number; lng: number } | null>(null)
 
-/**
- * 封面帧选择器的视频源候选列表（按推荐顺序）：720p → 480p → 1080p → 原画。
- * 转码档位的「成功 / 缺失」管理统一搬到「重新处理」管理页，这里不再实时拉档位列表，
- * 候选列表按"全部档都尝试一遍" + 原画兜底——浏览器 video element 会顺序回退到首个
- * 加载成功的源，画质不存在时只多 1-2 秒 onerror 开销，可接受。
- */
-const streamCandidates = computed(() =>
-  props.video?.objectKey
-    ? getCoverPickerCandidates(props.video.objectKey, normalizeCdnOrigin(cdnDomain.value))
-    : []
-)
+// 只使用后端登记并授权的播放地址。
+const streamCandidates = computed(() => [
+  ...(props.video?.videoVersions ?? []).filter(v => v.status === 'done' && v.url).map(v => v.url!),
+  ...(props.video?.sourceUrl ? [props.video.sourceUrl] : []),
+])
 const hasStream = computed(() => streamCandidates.value.length > 0)
 
 // 派生展示

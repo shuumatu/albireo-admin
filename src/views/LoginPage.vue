@@ -4,7 +4,7 @@
     <div class="login-card">
       <div class="login-header">
         <img
-          src="https://albireo.shuumatu.com/uploads/0e84dd80119bbfc52609e5e4fda0b57.png"
+          :src="albireoLogo"
           alt="Logo"
           class="login-logo"
         />
@@ -63,6 +63,7 @@
 </template>
 
 <script setup lang="ts">
+import albireoLogo from '../assets/albireo-logo.png'
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { darkTheme, useMessage, type FormInst, type FormRules } from 'naive-ui'

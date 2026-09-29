@@ -49,6 +49,7 @@ interface InitiateResponse {
   alreadyExists: boolean;
   url: string;          // 去重命中时为访问 url；DirectUpload 时为上传 url
   directUpload: boolean;
+  headers?: Record<string, string>;
 }
 
 export function initiateUpload(params: InitiateParams): Promise<InitiateResponse> {

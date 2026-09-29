@@ -31,10 +31,8 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount, watch } from 'vue'
 import type { VideoItem } from '../../api/manager'
-import { formatDuration, get480pStreamUrl } from './composables/videoFormat'
-import { useCdnDomain, normalizeCdnOrigin } from './composables/useCdnDomain'
+import { formatDuration } from './composables/videoFormat'
 
-const cdnDomain = useCdnDomain()
 
 const props = defineProps<{
   visible: boolean
@@ -52,7 +50,7 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const title = computed(() => props.video?.title || props.video?.fileName || '')
 const duration = computed(() => formatDuration(props.video?.durationMs))
 const streamUrl = computed(() =>
-  props.video?.objectKey ? get480pStreamUrl(props.video.objectKey, normalizeCdnOrigin(cdnDomain.value)) : ''
+  props.video?.videoVersions?.find(v => v.status === 'done' && v.resolution === '480p')?.url || props.video?.sourceUrl || ''
 )
 
 /**

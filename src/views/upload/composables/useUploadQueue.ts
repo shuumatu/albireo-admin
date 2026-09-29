@@ -269,6 +269,7 @@ function putBlobWithProgress(
   body: Blob,
   opts: {
     contentType?: string
+    headers?: Record<string, string>
     signal?: AbortSignal
     onUploadProgress?: (loaded: number, total: number) => void
   } = {},
@@ -281,7 +282,8 @@ function putBlobWithProgress(
     }
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', url)
-    if (opts.contentType) xhr.setRequestHeader('Content-Type', opts.contentType)
+    if (opts.contentType && !opts.headers?.['Content-Type']) xhr.setRequestHeader('Content-Type', opts.contentType)
+    for (const [name, value] of Object.entries(opts.headers ?? {})) xhr.setRequestHeader(name, value)
     xhr.upload.onprogress = (ev) => {
       if (!opts.onUploadProgress) return
       const total =
@@ -755,7 +757,7 @@ export function useUploadQueue() {
 
       // 3.2 直传（小文件或需要补传）
       if ((init.alreadyExists && init.url) || (init.directUpload && init.url)) {
-        await runDirectUpload(id, init.url)
+        await runDirectUpload(id, init.url, init.headers)
         return
       }
 
@@ -792,7 +794,7 @@ export function useUploadQueue() {
     }
   }
 
-  async function runDirectUpload(id: string, url: string) {
+  async function runDirectUpload(id: string, url: string, headers?: Record<string, string>) {
     const task = store.tasks.find((t) => t.id === id)
     const rt = runtimeMap.get(id)
     if (!task || !rt) return
@@ -804,6 +806,7 @@ export function useUploadQueue() {
       let markerLoaded = 0
       const result = await putBlobWithProgress(url, rt.file, {
         contentType: rt.fileType || undefined,
+        headers,
         signal: rt.abortController.signal,
         onUploadProgress: (loaded) => {
           const clamped = Math.min(loaded, rt.totalBytes)

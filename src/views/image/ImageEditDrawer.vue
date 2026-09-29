@@ -241,7 +241,6 @@ import { updateImage, addImagesToCollections, removeImagesFromCollections, fetch
 import { fetchImageLocation, updateImageLocation } from '../../api/location'
 import { fetchImageExif, updateImageExif, type ExifData } from '../../api/exif'
 import { useVideoThemeVars } from '../video/composables/useVideoThemeVars'
-import { toMediumUrl } from './composables/imageFormat'
 
 const themeCssVars = useVideoThemeVars()
 
@@ -284,7 +283,7 @@ const savedAtText = computed(() =>
 )
 
 const coverFailed = ref(false)
-const cover = computed(() => toMediumUrl(props.image?.imageUrl))
+const cover = computed(() => props.image?.mediumUrl || props.image?.thumbnailUrl || props.image?.imageUrl)
 
 const createdAtText = computed(() => {
   if (!props.image?.createdAt) return ''

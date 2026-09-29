@@ -16,6 +16,9 @@
       </div>
     </header>
 
+    <DurableJobPanel />
+    <DeletionJobPanel />
+
     <!-- 概览卡（仅在有任务时显示） -->
     <div v-if="tasks.length > 0" class="tp-summary">
       <div class="tp-summary-cell tp-summary-cell--video" :class="{ 'is-zero': summary.video === 0 }">
@@ -187,6 +190,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useMessage } from 'naive-ui'
+import DurableJobPanel from '../components/DurableJobPanel.vue'
+import DeletionJobPanel from '../components/DeletionJobPanel.vue'
 import { fetchProcessingTasks, retryAiAnalyze, type TaskProgressVO } from '../api/task'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
