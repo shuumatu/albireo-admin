@@ -86,7 +86,6 @@ export function fileExtensionUpper(fileName: string | null | undefined): string 
 
 export function visibilityText(v: string | null | undefined): string {
   if (v === 'private') return '私密'
-  if (v === 'friends') return '好友'
   if (v === 'public') return '公开'
   return ''
 }
@@ -95,7 +94,6 @@ export type NaiveTagType = 'default' | 'primary' | 'info' | 'success' | 'warning
 
 export function visibilityTagType(v: string | null | undefined): NaiveTagType {
   if (v === 'public') return 'success'
-  if (v === 'friends') return 'info'
   if (v === 'private') return 'warning'
   return 'default'
 }

@@ -212,7 +212,6 @@ const statusOptions = [
 
 const visibilityOptions = [
   { label: '公开', value: 'public' },
-  { label: '好友可见', value: 'friends' },
   { label: '私密', value: 'private' },
 ]
 

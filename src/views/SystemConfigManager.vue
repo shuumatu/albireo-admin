@@ -83,6 +83,7 @@ import { computed, h, onMounted, reactive, ref } from 'vue'
 import { NButton, NIcon, NTag, NEllipsis, useMessage, type DataTableColumns } from 'naive-ui'
 import { AlertCircleOutline, CheckmarkCircleOutline, CopyOutline, CreateOutline, EyeOffOutline, EyeOutline, KeyOutline, LockClosedOutline, RefreshOutline, SearchOutline, SettingsOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
 import { fetchManagedConfigs, upsertConfig, updateConfig, type SystemConfigVO } from '../api/systemConfig'
+import { visionModelOptions as modelOptions, visionModelLabels } from '../constants/visionModels'
 
 type ConfigValueType = 'string' | 'encrypted' | 'boolean'
 interface ConfigDefinition { category: string; categoryLabel: string; key: string; label: string; description: string; help: string; placeholder: string; valueType: ConfigValueType; encrypted: boolean; required: boolean }
@@ -99,7 +100,6 @@ const configDefinitions: ConfigDefinition[] = [
   { category: 'storage', categoryLabel: '对象存储', key: 'custom_domain', label: '历史媒体地址前缀', description: '用于识别数据库中保存的历史对象地址，并换成受权限保护的文件链接；域名本身无需开启公开访问。', help: '当前历史记录使用 https://albireo.shuumatu.com。若直接修改该值，旧地址可能无法识别。', placeholder: 'https://albireo.shuumatu.com', valueType: 'string', encrypted: false, required: true },
   { category: 'vision-ai', categoryLabel: '视觉 AI', key: 'active-model', label: '当前视觉 AI 模型', description: '选择视频分析任务使用的视觉模型，也可以在“视觉模型管理”页面切换。', help: '切换后只影响后续提交的分析任务。', placeholder: '选择视觉 AI 模型', valueType: 'string', encrypted: false, required: true },
 ]
-const modelOptions = [{ label: '智谱 Flash（免费）', value: 'zhipu' }, { label: '智谱 FlashX（付费）', value: 'zhipu-flashx' }, { label: 'Google Gemini', value: 'gemini' }, { label: 'Twelve Labs', value: 'twelvelabs' }]
 const booleanOptions = [{ label: '启用（true）', value: 'true' }, { label: '关闭（false）', value: 'false' }]
 const message = useMessage()
 const configs = ref<SystemConfigVO[]>([])
@@ -132,7 +132,7 @@ const lastUpdatedText = computed(() => lastUpdatedAt.value ? new Date(lastUpdate
 const editHelp = computed(() => editingDefinition.value?.encrypted && editingRow.value?.configured ? editingDefinition.value.help + ' 已配置；留空将保持原值。' : editingDefinition.value?.help ?? '')
 function formatDate(value: string) { if (!value) return '尚未保存'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false }) }
 async function copyValue(row: ConfigRow) { try { await navigator.clipboard.writeText(row.value); message.success('配置值已复制') } catch { message.error('复制失败，请检查浏览器权限') } }
-function displayValue(row: ConfigRow) { return !row.configured ? '待填写' : row.encrypted ? '••••••••' : row.value }
+function displayValue(row: ConfigRow) { return !row.configured ? '待填写' : row.encrypted ? '••••••••' : row.key === 'active-model' ? (visionModelLabels[row.value] ?? row.value) : row.value }
 const columns: DataTableColumns<ConfigRow> = [
   { title: '配置项', key: 'label', minWidth: 270, render: row => h('div', { class: 'config-key-cell' }, [h('div', { class: 'config-key' }, [h(NIcon, { size: 16, component: KeyOutline }), h('span', row.label), h(NTag, { type: row.required ? 'warning' : 'default', size: 'tiny', bordered: false, round: true }, { default: () => row.required ? '必填' : '可选' })]), h('span', { class: 'config-category' }, row.categoryLabel + ' / ' + row.category + '.' + row.key)]) },
   { title: '配置值', key: 'value', minWidth: 280, render: row => h('div', { class: 'value-cell' }, [h(NEllipsis, { class: row.configured ? 'value-text' : 'value-text pending-value', lineClamp: 2, tooltip: row.configured && !row.encrypted }, { default: () => displayValue(row) }), row.configured && !row.encrypted ? h(NButton, { text: true, size: 'tiny', ariaLabel: '复制配置值', onClick: () => copyValue(row) }, { icon: () => h(NIcon, { component: CopyOutline }) }) : null]) },

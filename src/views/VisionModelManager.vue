@@ -1,11 +1,11 @@
 <template>
   <div class="p-8">
-    <n-card title="视觉模型管理" class="max-w-2xl mx-auto">
+    <n-card title="视觉模型管理" class="max-w-3xl mx-auto">
       <n-spin :show="loading">
         <n-flex vertical :size="24">
           <n-flex align="center" :size="12">
             <span>当前模型：</span>
-            <n-tag :type="currentModel === 'gemini' ? 'success' : 'info'" size="large">
+            <n-tag type="info" size="large">
               {{ currentModel ? (modelLabels[currentModel] ?? currentModel) : '未知' }}
             </n-tag>
           </n-flex>
@@ -21,6 +21,8 @@
               </n-radio-button>
             </n-flex>
           </n-radio-group>
+
+          <p class="text-sm text-gray-500">切换后用于新提交的分析任务，已有描述可通过重新分析更新。免费版可能因访问量过大而暂时不可用。</p>
 
           <n-flex>
             <n-button
@@ -42,22 +44,9 @@
 import { ref, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { getVisionModel, switchVisionModel } from '../api/visionModel'
+import { visionModelOptions as modelOptions, visionModelLabels as modelLabels } from '../constants/visionModels'
 
 const message = useMessage()
-
-const modelLabels: Record<string, string> = {
-  zhipu: '智谱 AI (glm-4.6v-flash, 免费)',
-  'zhipu-flashx': '智谱 AI (glm-4.6v-flashx, 付费)',
-  gemini: 'Google Gemini 3 Flash Preview',
-  twelvelabs: 'Twelve Labs'
-}
-
-const modelOptions = [
-  { label: '智谱 Flash (免费, 限流严重)', value: 'zhipu' },
-  { label: '智谱 FlashX (付费, 限流宽松)', value: 'zhipu-flashx' },
-  { label: 'Google Gemini', value: 'gemini' },
-  { label: 'Twelve Labs', value: 'twelvelabs' }
-]
 
 const currentModel = ref<string | null>(null)
 const selectedModel = ref<string>('zhipu')

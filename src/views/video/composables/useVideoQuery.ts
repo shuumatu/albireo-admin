@@ -68,7 +68,8 @@ function parseInitialState(query: Record<string, any>): VideoQueryState {
   const s: VideoQueryState = { ...DEFAULT_STATE }
   if (typeof query.q === 'string') s.keyword = query.q
   if (typeof query.status === 'string' && query.status) s.status = query.status
-  if (typeof query.visibility === 'string' && query.visibility) s.visibility = query.visibility
+  if (query.visibility === 'friends') s.visibility = 'private'
+  else if (query.visibility === 'private' || query.visibility === 'public') s.visibility = query.visibility
   if (query.hasLocation === 'yes' || query.hasLocation === 'no') {
     s.hasLocation = query.hasLocation
   }
@@ -249,7 +250,6 @@ function statusLabel(s: string): string {
 
 function visibilityLabel(v: string): string {
   if (v === 'private') return '私密'
-  if (v === 'friends') return '好友可见'
   if (v === 'public') return '公开'
   return v
 }
