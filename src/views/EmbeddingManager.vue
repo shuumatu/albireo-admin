@@ -271,6 +271,7 @@
       </n-data-table>
 
       <n-alert type="info" title="处理状态说明" style="margin-top: 14px">
+        <p>图片统计与清单仅包含已处理完成的照片，不包含视频生成的封面等附属图片。视频封面仍用于视频预览。</p>
         <ul class="explain">
           <li><span class="dot" :style="{ background: HEAT_COLORS[0] }"></span><strong>主路径完成</strong>：已使用视频帧或原图生成向量。</li>
           <li><span class="dot" :style="{ background: HEAT_COLORS[1] }"></span><strong>封面兜底</strong>：主媒体处理失败后使用封面生成，检索质量可能较弱。</li>

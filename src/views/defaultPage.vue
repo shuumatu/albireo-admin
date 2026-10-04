@@ -63,7 +63,7 @@ async function loadOverview() {
   loading.value = true
   const results = await Promise.allSettled([
     fetchImages({ page: 1, pageSize: 1 }).then(readTotal),
-    fetchVideoList({ page: 1, pageSize: 1, collectionId: null }).then(readTotal),
+    fetchVideoList({ page: 1, pageSize: 1, collectionId: 0 }).then(readTotal),
     Promise.all([fetchCollections({ page: 1, pageSize: 1 }), fetchImageCollections({ page: 1, pageSize: 1 })]).then(items => items.reduce((sum, item) => sum + readTotal(item), 0)),
     fetchProcessingTasks(),
   ])

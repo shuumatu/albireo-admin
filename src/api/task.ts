@@ -19,8 +19,21 @@ export interface TaskProgressVO {
   qualityProgress?: Record<string, number> | null;
 }
 
-export function fetchProcessingTasks(): Promise<TaskProgressVO[]> {
-  return request.get("/task/processing");
+interface TaskListResponse {
+  code: number;
+  message: string;
+  data: TaskProgressVO[];
+}
+
+export async function fetchProcessingTasks(): Promise<TaskProgressVO[]> {
+  const response = await request.get<
+    TaskProgressVO[] | TaskListResponse,
+    TaskProgressVO[] | TaskListResponse
+  >("/task/processing");
+  if (Array.isArray(response)) return response;
+  if (response.code !== 200) throw new Error(response.message || "获取任务失败");
+  if (!Array.isArray(response.data)) throw new Error("任务列表格式不正确");
+  return response.data;
 }
 
 export function fetchTaskStatus(hash: string): Promise<TaskProgressVO> {
