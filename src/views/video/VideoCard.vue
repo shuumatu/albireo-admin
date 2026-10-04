@@ -1,5 +1,10 @@
 <template>
   <div
+    tabindex="0"
+    role="group"
+    :aria-label="`${title}，按 Enter 编辑，按空格${selected ? '取消选择' : '选择'}`"
+    @keydown.enter.self.prevent="$emit('menu', video, 'edit')"
+    @keydown.space.self.prevent="$emit('check', video, $event as unknown as MouseEvent)"
     :class="[
       'video-card',
       { 'video-card--selected': selected, 'video-card--needs-attention': attention, 'video-card--has-selection-mode': hasSelection },
@@ -12,7 +17,7 @@
     <!-- 16:9 封面区，整张图作背景 -->
     <div class="cover-wrapper" ref="coverWrapper">
       <img
-        v-if="video.coverUrl"
+        v-if="video.coverUrl && !coverFailed"
         :src="video.coverUrl"
         :alt="title"
         class="cover-img"
@@ -122,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, h } from 'vue'
+import { computed, ref, h, watch, onBeforeUnmount } from 'vue'
 import { NCheckbox, NDropdown, NTag } from 'naive-ui'
 import VideoStatusOverlay from './VideoStatusOverlay.vue'
 import {
@@ -157,6 +162,7 @@ const emit = defineEmits<{
 
 const coverWrapper = ref<HTMLElement | null>(null)
 const coverFailed = ref(false)
+watch(() => props.video.coverUrl, () => { coverFailed.value = false })
 const isHovering = ref(false)
 
 const title = computed(() => props.video.title || props.video.fileName || '未命名视频')
@@ -198,7 +204,7 @@ const menuOptions = computed(() => {
     { label: '在新标签页打开', key: 'open-public' },
   ]
   if (!overlayStatus.value) {
-    opts.push({ label: '设置封面帧', key: 'set-cover' })
+    opts.push({ label: '视频截帧', key: 'set-cover' })
     // 仅 done 视频可分享：处理中 / 转码失败的视频对外不可播放
     opts.push({ label: '分享', key: 'share' })
   }
@@ -254,12 +260,13 @@ function onMouseLeave() {
 function onMenuSelect(action: string) {
   emit('menu', props.video, action)
 }
+onBeforeUnmount(() => { if (previewTimer) window.clearTimeout(previewTimer) })
 </script>
 
 <style scoped>
 .video-card {
   position: relative;
-  border-radius: 10px;
+  border-radius: 14px;
   overflow: hidden;
   cursor: pointer;
   background: var(--n-card-color);
@@ -371,8 +378,8 @@ function onMenuSelect(action: string) {
   -webkit-backdrop-filter: blur(4px);
 }
 .badge--resolution {
-  background: rgba(40, 32, 70, 0.78);
-  color: #e0d5ff;
+  background: rgba(65, 86, 58, 0.86);
+  color: #e0edd4;
 }
 .badge--duration {
   background: rgba(0, 0, 0, 0.66);
@@ -493,4 +500,8 @@ function onMenuSelect(action: string) {
 .more-btn:hover {
   background: rgba(0, 0, 0, 0.78);
 }
+
+.video-card:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
+@media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .video-card, .cover-img { transition: none; } }
 </style>

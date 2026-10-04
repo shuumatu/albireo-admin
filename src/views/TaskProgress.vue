@@ -1,7 +1,7 @@
 <template>
-  <div class="tp-page">
+  <div class="tp-page admin-page">
     <!-- 顶部：标题 + 概览 -->
-    <header class="tp-header">
+    <header class="tp-header admin-page-header">
       <div class="tp-title-line">
         <h2 class="tp-title">处理进度</h2>
         <n-tag v-if="tasks.length > 0" type="info" size="small" round>
@@ -10,14 +10,20 @@
         <span v-if="lastUpdatedText" class="tp-updated">最近刷新 {{ lastUpdatedText }}</span>
       </div>
       <div class="tp-actions">
-        <n-switch v-model:value="autoRefresh" size="small" />
+        <n-switch v-model:value="autoRefresh" size="small" aria-label="自动刷新任务" />
         <span class="tp-actions-label">自动刷新</span>
         <n-button :loading="loading" @click="fetchTasks" size="small" tertiary>刷新</n-button>
       </div>
     </header>
 
-    <DurableJobPanel />
-    <DeletionJobPanel />
+    <p class="tp-description">查看媒体处理阶段与实时进度，筛选异常任务后直接重试。自动刷新会在页面隐藏时暂停。</p>
+    <n-alert v-if="loadError" type="error" class="tp-error">{{ loadError }}<template #action><n-button size="small" :loading="loading" @click="fetchTasks">重新加载</n-button></template></n-alert>
+    <div class="tp-filter admin-toolbar">
+      <n-input v-model:value="keyword" placeholder="搜索文件名或任务 Hash" clearable class="tp-search" aria-label="搜索任务" />
+      <n-select v-model:value="taskFilter" :options="filterOptions" class="tp-select" aria-label="任务状态筛选" />
+      <n-button v-if="keyword || taskFilter !== 'all'" text type="primary" @click="keyword = ''; taskFilter = 'all'">重置</n-button>
+      <span class="tp-result">显示 {{ filteredTasks.length }} / {{ tasks.length }} 个任务</span>
+    </div>
 
     <!-- 概览卡（仅在有任务时显示） -->
     <div v-if="tasks.length > 0" class="tp-summary">
@@ -53,16 +59,17 @@
 
     <!-- 空状态 -->
     <n-empty
-      v-if="!loading && tasks.length === 0"
-      description="当前没有处理中的任务"
+      v-if="!loading && !loadError && filteredTasks.length === 0"
+      :description="tasks.length ? '没有匹配的任务，试试调整筛选条件' : '当前没有处理中的任务'"
       class="tp-empty"
     />
 
     <!-- 任务卡片列表 -->
-    <div v-if="tasks.length > 0" class="tp-list">
+    <n-skeleton v-if="loading && !tasks.length" height="120px" style="margin: 20px 0" :sharp="false" />
+    <div v-if="filteredTasks.length > 0" class="tp-list">
       <div
-        v-for="task in tasks"
-        :key="task.hash"
+        v-for="task in filteredTasks"
+        :key="task.type + task.hash"
         class="tp-card"
         :class="cardClass(task)"
       >
@@ -95,6 +102,7 @@
               size="tiny"
               type="warning"
               :loading="retryingHash === task.hash"
+              :disabled="retryingHash !== null && retryingHash !== task.hash"
               @click="handleRetry(task.hash)"
             >
               重试 AI 分析
@@ -184,6 +192,10 @@
         </div>
       </div>
     </div>
+    <n-collapse class="tp-history" :default-expanded-names="['jobs']">
+      <n-collapse-item title="持久任务与重试记录" name="jobs"><DurableJobPanel :auto-refresh="autoRefresh" /></n-collapse-item>
+      <n-collapse-item title="文件清理记录" name="deletions"><DeletionJobPanel :auto-refresh="autoRefresh" /></n-collapse-item>
+    </n-collapse>
   </div>
 </template>
 
@@ -203,6 +215,15 @@ dayjs.locale('zh-cn')
 const message = useMessage()
 const tasks = ref<TaskProgressVO[]>([])
 const loading = ref(false)
+const loadError = ref('')
+const keyword = ref('')
+const taskFilter = ref('all')
+const filterOptions = [{ label: '全部任务', value: 'all' }, { label: '进行中', value: 'running' }, { label: '失败任务', value: 'failed' }, { label: '已完成', value: 'done' }, { label: '视频', value: 'video' }, { label: '图片', value: 'image' }]
+const filteredTasks = computed(() => tasks.value.filter(task => {
+  const query = keyword.value.trim().toLowerCase()
+  return (!query || (task.fileName + ' ' + task.hash).toLowerCase().includes(query)) && (taskFilter.value === 'all' || taskFilter.value === task.type || taskFilter.value === task.status || (taskFilter.value === 'running' && isRunning(task)) || (taskFilter.value === 'failed' && isFailed(task)))
+}))
+let disposed = false
 const retryingHash = ref<string | null>(null)
 const autoRefresh = ref(true)
 const lastUpdatedAt = ref<number | null>(null)
@@ -375,19 +396,23 @@ const lastUpdatedText = computed(() => {
 })
 
 async function fetchTasks() {
+  if (loading.value || disposed) return
   loading.value = true
   try {
     const res = await fetchProcessingTasks()
+    if (disposed) return
     tasks.value = Array.isArray(res) ? res : ((res as any).data ?? [])
     lastUpdatedAt.value = Date.now()
+    loadError.value = ''
   } catch {
-    message.error('获取任务列表失败')
+    if (!disposed) loadError.value = '获取任务失败，已保留上次结果。请检查连接后重新加载。'
   } finally {
     loading.value = false
   }
 }
 
 async function handleRetry(hash: string) {
+  if (retryingHash.value) return
   retryingHash.value = hash
   try {
     await retryAiAnalyze(hash)
@@ -404,7 +429,7 @@ function startPolling() {
   stopPolling()
   // 处理中阶段：2s 一次给到接近实时的 progress 反馈
   // （后端 task/processing 是单条 SQL + 内存 map merge，开销可忽略）
-  timer = setInterval(fetchTasks, 2000)
+  timer = setInterval(() => { if (!document.hidden) void fetchTasks() }, 2000)
 }
 
 function stopPolling() {
@@ -427,6 +452,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
   stopPolling()
   if (nowTimer) {
     clearInterval(nowTimer)
@@ -436,6 +462,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.tp-description { color: var(--n-text-color-3); margin: -2px 0 22px; font-size: 13px; }
+.tp-filter { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 16px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 14px; margin-bottom: 16px; }.tp-search { width: 300px; }.tp-select { width: 160px; }.tp-result { margin-left: auto; font-size: 12px; color: var(--n-text-color-3); }.tp-error { margin-bottom: 16px; }.tp-history { margin-top: 28px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 14px; padding: 20px; }
+@media(max-width:640px) { .tp-filter .tp-search { width: 100%; }.tp-title-line { flex-wrap: wrap; }.tp-filter .tp-result { margin-left: 0; } }
 /* ============================== 页面外壳 ============================== */
 .tp-page {
   padding: 20px 32px 40px;
@@ -569,11 +598,11 @@ onUnmounted(() => {
 
 /* 视频 / 图片：浅色底 + 中性色图标，避免和右侧数字抢眼 */
 .tp-summary-cell--video .tp-summary-icon {
-  background: #eaf3ff;
-  color: #2080f0;
+  background: var(--admin-accent-soft, #e6f3e9);
+  color: var(--admin-accent, #2f7b5b);
 }
 .tp-summary-cell--image .tp-summary-icon {
-  background: #ecf8ec;
+  background: var(--admin-hover, #f0f7ef);
   color: #18a058;
 }
 
@@ -647,11 +676,11 @@ onUnmounted(() => {
   justify-content: center;
 }
 .tp-card-icon.video {
-  background: #e8f4fd;
-  color: #2080f0;
+  background: var(--admin-accent-soft, #e6f3e9);
+  color: var(--admin-accent, #2f7b5b);
 }
 .tp-card-icon.image {
-  background: #e8fde8;
+  background: var(--admin-hover, #f0f7ef);
   color: #18a058;
 }
 
@@ -829,7 +858,7 @@ onUnmounted(() => {
   box-shadow: 0 0 8px rgba(240, 160, 32, 0.35);
 }
 .tp-bar-fill.is-ai {
-  background: linear-gradient(90deg, #4f9bff, #22d3ee);
+  background: linear-gradient(90deg, #4e926b, #abd3a3);
 }
 .tp-bar-fill.is-done {
   background: linear-gradient(90deg, #36ad6a, #6dd4a3);

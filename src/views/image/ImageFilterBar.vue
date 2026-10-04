@@ -7,6 +7,7 @@
       <n-input
         v-model:value="localKeyword"
         placeholder="搜索标题 / 文件名 / 描述"
+        aria-label="搜索素材"
         clearable
         size="medium"
         class="search-input"
@@ -64,6 +65,7 @@
         :value="state.collectionId == null ? null : String(state.collectionId)"
         placeholder="合集"
         :options="collectionOptions"
+        filterable
         clearable
         size="medium"
         style="width: 160px;"
@@ -86,6 +88,8 @@
           size="medium"
           @click="$emit('change-view', 'grid')"
           title="网格视图 (g)"
+          aria-label="网格视图"
+          :aria-pressed="state.viewMode === 'grid'"
         >
           <svg viewBox="0 0 24 24" width="16" height="16">
             <path
@@ -99,6 +103,8 @@
           size="medium"
           @click="$emit('change-view', 'list')"
           title="列表视图 (l)"
+          aria-label="列表视图"
+          :aria-pressed="state.viewMode === 'list'"
         >
           <svg viewBox="0 0 24 24" width="16" height="16">
             <path
@@ -114,7 +120,7 @@
         trigger="click"
         @select="onSettingsSelect"
       >
-        <n-button size="medium" quaternary>
+        <n-button size="medium" quaternary aria-label="显示设置" title="显示设置">
           <svg viewBox="0 0 24 24" width="16" height="16">
             <path
               d="M19.14 12.94a7.49 7.49 0 0 0 .05-1.88l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54A.5.5 0 0 0 13.96 2h-3.84a.5.5 0 0 0-.49.42l-.36 2.54a7.03 7.03 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.74 8.48a.5.5 0 0 0 .12.61l2.03 1.58a7.49 7.49 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32c.14.24.43.34.6.22l2.39-.96c.5.4 1.05.71 1.62.94l.36 2.54a.5.5 0 0 0 .49.42h3.84a.5.5 0 0 0 .49-.42l.36-2.54a7.03 7.03 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.61l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
@@ -145,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { NInput, NSelect, NButton, NButtonGroup, NDropdown, NTag } from 'naive-ui'
 import type { ViewMode, DensityMode } from './composables/useImageQuery'
 import type { ImageListOrderBy, ImageListOrder } from '../../api/images'
@@ -184,19 +190,24 @@ const emit = defineEmits<{
 
 // keyword 用本地 ref + emit 实现"输入即派发"，由父组件的 useImageQuery 做 debounce
 const localKeyword = ref(props.state.keyword)
-watch(() => props.state.keyword, (v) => { if (v !== localKeyword.value) localKeyword.value = v })
+watch(() => props.state.keyword, (v) => {
+  if (kwTimer) window.clearTimeout(kwTimer)
+  kwTimer = null
+  localKeyword.value = v
+})
 
 let kwTimer: number | null = null
 function onKeywordInput(v: string) {
   if (kwTimer) window.clearTimeout(kwTimer)
-  kwTimer = window.setTimeout(() => emit('update-keyword', v), 80)
+  kwTimer = window.setTimeout(() => { kwTimer = null; emit('update-keyword', v.trim()) }, 300)
 }
+onBeforeUnmount(() => { if (kwTimer) window.clearTimeout(kwTimer) })
 function flushKeyword() {
   if (kwTimer) {
     window.clearTimeout(kwTimer)
     kwTimer = null
   }
-  emit('update-keyword', localKeyword.value)
+  emit('update-keyword', localKeyword.value.trim())
 }
 
 // 'all' 是 UI 层概念，emit 出去会被规整为 null（"全部类型"）
@@ -320,5 +331,12 @@ function onSettingsSelect(key: string) {
   flex: 1 1 280px;
   min-width: 220px;
   max-width: 360px;
+}
+
+@media (max-width: 760px) {
+  .filter-bar { padding: 16px 12px; position: relative; }
+  .page-title { width: 100%; border: 0; font-size: 22px; margin-bottom: 6px; }
+  .search-input { min-width: 0; max-width: none; flex: 1 1 100%; }
+  .filter-bar__main > .n-select { flex: 1 1 125px; min-width: 0; }
 }
 </style>

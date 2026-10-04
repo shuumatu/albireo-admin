@@ -1,5 +1,10 @@
 <template>
   <div
+    tabindex="0"
+    role="group"
+    :aria-label="`${title}，按 Enter 编辑，按空格${selected ? '取消选择' : '选择'}`"
+    @keydown.enter.self.prevent="$emit('menu', image, 'edit')"
+    @keydown.space.self.prevent="$emit('check', image, !selected)"
     :class="[
       'image-row',
       { 'image-row--selected': selected, 'image-row--needs-attention': attention },
@@ -350,4 +355,8 @@ function onRowDblClick() {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.image-row:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
+@media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .image-row, .cover-img { transition: none; } }
 </style>

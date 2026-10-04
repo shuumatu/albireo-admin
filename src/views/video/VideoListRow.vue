@@ -1,5 +1,10 @@
 <template>
   <div
+    tabindex="0"
+    role="group"
+    :aria-label="`${title}，按 Enter 编辑，按空格${selected ? '取消选择' : '选择'}`"
+    @keydown.enter.self.prevent="$emit('menu', video, 'edit')"
+    @keydown.space.self.prevent="$emit('check', video, !selected)"
     :class="[
       'video-row',
       { 'video-row--selected': selected, 'video-row--needs-attention': attention },
@@ -15,7 +20,7 @@
     <!-- 缩略图 + 时长 / 分辨率徽标 -->
     <div class="row-thumb">
       <img
-        v-if="video.coverUrl"
+        v-if="video.coverUrl && !coverFailed"
         :src="video.coverUrl"
         :alt="title"
         loading="lazy"
@@ -109,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { NCheckbox, NButton, NDropdown, NTag } from 'naive-ui'
 import VideoStatusOverlay from './VideoStatusOverlay.vue'
 import {
@@ -140,6 +145,7 @@ const emit = defineEmits<{
 }>()
 
 const coverFailed = ref(false)
+watch(() => props.video.coverUrl, () => { coverFailed.value = false })
 
 const title = computed(() => props.video.title || props.video.fileName || '未命名视频')
 const extension = computed(() => fileExtensionUpper(props.video.fileName))
@@ -169,7 +175,7 @@ const menuOptions = computed(() => {
   const opts: any[] = [
     { label: '编辑', key: 'edit' },
     { label: '在新标签页打开', key: 'open-public' },
-    { label: '设置封面帧', key: 'set-cover' },
+    { label: '视频截帧', key: 'set-cover' },
     { label: '复制对象 Key', key: 'copy-key' },
   ]
   // 仅 done 视频可分享，与 VideoCard / ImageListRow 一致
@@ -344,4 +350,8 @@ function onRowDblClick() {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.video-row:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
+@media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .video-row, .cover-img { transition: none; } }
 </style>

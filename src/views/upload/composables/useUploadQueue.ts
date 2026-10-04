@@ -334,7 +334,7 @@ export function useUploadQueue() {
     }
   }
   onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
-  onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+  onBeforeUnmount(() => { pauseAll(); window.removeEventListener('beforeunload', onBeforeUnload) })
 
   /**
    * 后台异步生成缩略图并写回 store；不阻塞主流程，失败时静默忽略。
@@ -465,6 +465,7 @@ export function useUploadQueue() {
     const rt = runtimeMap.get(id)
     if (!task || !rt) return
     if (
+      task.status !== 'queued' &&
       task.status !== 'uploading' &&
       task.status !== 'hashing' &&
       task.status !== 'preparing'
@@ -494,7 +495,7 @@ export function useUploadQueue() {
 
   function retryTask(id: string) {
     const task = store.tasks.find((t) => t.id === id)
-    if (!task) return
+    if (!task || task.status !== 'error') return
     if (task.isStale) return
     const rt = runtimeMap.get(id)
     if (!rt) return
@@ -669,6 +670,7 @@ export function useUploadQueue() {
       store.updateTask(id, { status: 'preparing' })
       const meta = await extractMetadata(rt.file)
       if (rt.cancelled) return
+      if (rt.paused) { store.updateTask(id, { status: 'paused' }); return }
       store.updateTask(id, {
         gpsData: meta.gpsData,
         dateTime: meta.dateTime,

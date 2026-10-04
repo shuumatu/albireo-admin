@@ -1,11 +1,10 @@
 <template>
-  <n-config-provider :theme="darkTheme">
   <div class="login-container">
     <div class="login-card">
       <div class="login-header">
         <img
           :src="albireoLogo"
-          alt="Logo"
+          alt="Albireo 狐狸"
           class="login-logo"
         />
         <h1 class="login-title">管理后台</h1>
@@ -33,7 +32,7 @@
             show-password-on="click"
             placeholder="请输入密码"
             size="large"
-            :input-props="{ autocomplete: 'off' }"
+            :input-props="{ autocomplete: 'current-password' }"
           >
             <template #prefix>
               <n-icon :component="LockIcon" />
@@ -59,20 +58,20 @@
       </n-form>
     </div>
   </div>
-  </n-config-provider>
 </template>
 
 <script setup lang="ts">
-import albireoLogo from '../assets/albireo-logo.png'
+const albireoLogo = `${import.meta.env.BASE_URL}albireo-favicon.svg`
 import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { darkTheme, useMessage, type FormInst, type FormRules } from 'naive-ui'
+import { useRoute, useRouter } from 'vue-router'
+import { useMessage, type FormInst, type FormRules } from 'naive-ui'
 import { PersonOutline as PersonIcon, LockClosedOutline as LockIcon } from '@vicons/ionicons5'
 import { adminLogin } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 import { saveCredential, loadCredential, clearCredential } from '../utils/credentialCrypto'
 
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const authStore = useAuthStore()
 const formRef = ref<FormInst | null>(null)
@@ -85,12 +84,14 @@ const formData = reactive({
 })
 
 onMounted(async () => {
-  const saved = await loadCredential()
-  if (saved) {
-    formData.username = saved.username
-    formData.password = saved.password
-    rememberMe.value = true
-  }
+  try {
+    const saved = await loadCredential()
+    if (saved) {
+      formData.username = saved.username
+      formData.password = saved.password
+      rememberMe.value = true
+    }
+  } catch { clearCredential() }
 })
 
 const rules: FormRules = {
@@ -103,9 +104,13 @@ const rules: FormRules = {
 }
 
 async function handleLogin() {
+  if (loading.value) return
+  loading.value = true
   try {
+    formData.username = formData.username.trim()
     await formRef.value?.validate()
   } catch {
+    loading.value = false
     return
   }
 
@@ -113,13 +118,13 @@ async function handleLogin() {
   try {
     const { data } = await adminLogin(formData.username, formData.password)
     authStore.setLoginInfo(data)
-    if (rememberMe.value) {
-      await saveCredential(formData.username, formData.password)
-    } else {
-      clearCredential()
-    }
+    try {
+      if (rememberMe.value) await saveCredential(formData.username, formData.password)
+      else clearCredential()
+    } catch { message.warning('已登录，但无法保存本机登录信息') }
     message.success('登录成功')
-    router.push('/')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    router.replace(redirect.startsWith('/') && !redirect.startsWith('//') && !redirect.startsWith('/login') ? redirect : '/')
   } catch (err: any) {
     const status = err.response?.status
     const msg = err.response?.data
@@ -138,21 +143,22 @@ async function handleLogin() {
 
 <style scoped>
 .login-container {
+  padding: 24px 16px;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+  background: radial-gradient(ellipse at 18% 16%, #dcefd8 0%, transparent 50%), linear-gradient(135deg, #f5faf2 0%, #eaf5e8 55%, #d6ead3 100%);
 }
 
 .login-card {
-  width: 400px;
+  width: min(440px, 100%);
   padding: 48px 40px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(20px);
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid #d9e9d8;
+  box-shadow: 0 16px 50px rgba(49, 90, 56, 0.09);
 }
 
 .login-header {
@@ -161,21 +167,22 @@ async function handleLogin() {
 }
 
 .login-logo {
-  height: 56px;
+  width: 76px;
+  height: 76px;
   margin-bottom: 16px;
 }
 
 .login-title {
   font-size: 24px;
   font-weight: 600;
-  color: #fff;
+  color: var(--admin-text);
   margin: 0 0 8px 0;
   letter-spacing: 1px;
 }
 
 .login-subtitle {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--admin-muted);
   margin: 0;
 }
 
@@ -187,10 +194,12 @@ async function handleLogin() {
 }
 
 :deep(.n-form-item-label) {
-  color: rgba(255, 255, 255, 0.7) !important;
+  color: var(--n-text-color-2);
 }
+.login-card :deep(.n-input__prefix .n-icon) { color: var(--admin-icon); }
 
 .remember-row {
   margin-bottom: 4px;
 }
+@media (max-width: 480px) { .login-card { padding: 32px 24px; } }
 </style>

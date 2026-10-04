@@ -60,7 +60,7 @@ const streamUrl = computed(() =>
 const popoverStyle = computed(() => {
   const rect = props.anchorRect
   if (!rect) return { display: 'none' }
-  const W = 400
+  const W = Math.min(400, window.innerWidth - 24)
   const H = Math.round(W * 9 / 16) + 40 // video + caption
   const margin = 12
   let left = rect.right + margin

@@ -46,6 +46,7 @@
       <span class="upload-summary__concurrency-label">全局并发</span>
       <n-slider
         v-model:value="concurrency"
+        aria-label="上传并发数量"
         :min="1"
         :max="8"
         :marks="{ 1: '1', 4: '4', 8: '8' }"
@@ -89,7 +90,7 @@ const concurrency = computed({
   background: var(--n-color-modal, rgba(127, 127, 127, 0.06));
   border: 1px solid var(--n-border-color);
 }
-.upload-summary__cell--info { border-color: var(--n-color-target, #1890ff44); }
+.upload-summary__cell--info { border-color: var(--n-color-target, #91cba366); }
 .upload-summary__cell--warning { border-color: #f0a02044; }
 .upload-summary__cell--success { border-color: #18a05844; }
 .upload-summary__cell--error { border-color: #d0364844; }
@@ -139,4 +140,5 @@ const concurrency = computed({
     flex-wrap: wrap;
   }
 }
+.upload-summary__progress-meta { flex-wrap: wrap; gap: 6px; }
 </style>

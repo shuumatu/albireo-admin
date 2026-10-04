@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { VideoListOrder, VideoListOrderBy } from '../../../api/manager'
 
@@ -124,6 +124,8 @@ export function useVideoQuery() {
       syncToUrl()
     }, 350)
   }
+
+  onBeforeUnmount(() => { if (kwTimer) window.clearTimeout(kwTimer) })
 
   function syncToUrl() {
     if (route.path !== '/manager/video') return

@@ -10,7 +10,7 @@
         type="error"
         @click.stop="$emit('retry')"
       >
-        重试
+        {{ status === 'process_failed' ? '去处理' : '重新上传' }}
       </n-button>
     </n-flex>
   </div>
@@ -66,7 +66,7 @@ const canRetry = computed(() => props.status === 'failed' || props.status === 'p
   );
 }
 
-.status-uploading      { --overlay-tone: #1668dc; }
+.status-uploading      { --overlay-tone: #397d65; }
 .status-pending        { --overlay-tone: #595959; }
 .status-processing     { --overlay-tone: #d46b08; }
 .status-failed         { --overlay-tone: #cf1322; }

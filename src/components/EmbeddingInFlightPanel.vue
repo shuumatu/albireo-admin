@@ -12,7 +12,7 @@
   <Teleport to="body">
     <transition name="ifp-fade">
       <div v-if="visibleTasks.length > 0" class="ifp-panel" :class="{ 'is-collapsed': collapsed }">
-        <div class="ifp-header" @click="collapsed = !collapsed">
+        <div class="ifp-header" role="button" tabindex="0" :aria-expanded="!collapsed" aria-label="展开或收起实时处理面板" @keydown.enter="collapsed = !collapsed" @keydown.space.prevent="collapsed = !collapsed" @click="collapsed = !collapsed">
           <span class="ifp-dot" :class="{ 'is-busy': hasInProgress }"></span>
           <span class="ifp-title">实时处理</span>
           <span class="ifp-count">{{ inProgressCount }}/{{ visibleTasks.length }}</span>
@@ -31,6 +31,7 @@
             title="在下方媒体清单中定位"
             @click="locateTask(t)"
             @keydown.enter="locateTask(t)"
+            @keydown.space.prevent="locateTask(t)"
           >
             <div class="ifp-row-head">
               <span class="ifp-mtype">{{ t.mediaType === 'video' ? '视频' : '图片' }}</span>
@@ -63,6 +64,7 @@ const tasks = ref<InFlightTask[]>([])
 const collapsed = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 let inflight = false  // 防止上一轮还没回来又发新一轮（极端慢网络）
+let disposed = false
 const nowMs = ref(Date.now())
 
 const emit = defineEmits<{
@@ -70,7 +72,7 @@ const emit = defineEmits<{
 }>()
 
 async function pollOnce() {
-  if (document.hidden) return
+  if (document.hidden || disposed) return
   nowMs.value = Date.now()
   if (inflight) return
   inflight = true
@@ -79,6 +81,7 @@ async function pollOnce() {
     // 所以这里 await 直接拿到的就是 envelope 本身（不是 AxiosResponse）。
     // axios 的 .get<T>() 类型签名跟运行时实际行为对不上，需要 as any 兜一下。
     const env = (await getEmbeddingInFlight()) as unknown as { tasks?: InFlightTask[] }
+    if (disposed) return
     tasks.value = env?.tasks || []
   } catch (e) {
     // 故意只 console.debug，不弹 message —— 这是后台增强观测，
@@ -98,6 +101,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   if (timer) {
     clearInterval(timer)
     timer = null
@@ -184,13 +188,13 @@ function locateTask(task: InFlightTask) {
   position: fixed;
   right: 16px;
   bottom: 16px;
-  width: 320px;
+  width: min(320px, calc(100vw - 32px));
   max-height: 60vh;
-  background: rgba(28, 28, 32, 0.92);
-  color: #f1f1f1;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: rgba(248, 252, 247, 0.96);
+  color: var(--admin-text, #25372b);
+  border: 1px solid var(--admin-border, #e0e9e1);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(41, 74, 48, 0.14);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 12px;
   z-index: 9999;
@@ -205,19 +209,19 @@ function locateTask(task: InFlightTask) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--admin-accent-soft, #e6f3e9);
   cursor: pointer;
   user-select: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--admin-border, #e0e9e1);
 }
 
-.ifp-header:hover { background: rgba(0, 0, 0, 0.35); }
+.ifp-header:hover { background: #dceedd; }
 
 .ifp-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #4a4a4a;
+  background: #93a896;
 }
 .ifp-dot.is-busy {
   background: #22c55e;
@@ -230,14 +234,14 @@ function locateTask(task: InFlightTask) {
 
 .ifp-title { font-weight: 600; letter-spacing: 0.3px; }
 .ifp-count {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--admin-hover, #f0f7ef);
   padding: 1px 6px;
   border-radius: 8px;
   font-size: 11px;
-  color: #d0d0d0;
+  color: var(--admin-accent, #2f7b5b);
 }
 .ifp-spacer { flex: 1; }
-.ifp-fold { font-size: 10px; color: #888; }
+.ifp-fold { font-size: 10px; color: #718374; }
 
 .ifp-body {
   padding: 6px;
@@ -248,8 +252,8 @@ function locateTask(task: InFlightTask) {
 }
 
 .ifp-row {
-  background: rgba(255, 255, 255, 0.04);
-  border-left: 3px solid #4f9bff;
+  background: #ffffff;
+  border-left: 3px solid #4e926b;
   padding: 6px 8px;
   border-radius: 4px;
   transition: background 0.2s;
@@ -257,7 +261,7 @@ function locateTask(task: InFlightTask) {
 }
 .ifp-row:hover,
 .ifp-row:focus-visible {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--admin-hover, #f0f7ef);
   outline: none;
 }
 .ifp-row.is-done   { border-left-color: #22c55e; opacity: 0.85; }
@@ -271,31 +275,31 @@ function locateTask(task: InFlightTask) {
   font-size: 11.5px;
 }
 .ifp-mtype { font-size: 13px; }
-.ifp-id    { color: #f1f1f1; font-weight: 500; }
+.ifp-id    { color: var(--admin-text, #25372b); font-weight: 500; }
 .ifp-hash  {
-  color: #888;
+  color: #718374;
   font-family: 'SF Mono', Consolas, monospace;
   font-size: 10.5px;
 }
 .ifp-stage {
-  color: #d4d4d4;
+  color: #4c6353;
   margin-left: 2px;
 }
 .ifp-elapsed {
-  color: #888;
+  color: #718374;
   font-family: 'SF Mono', Consolas, monospace;
   font-size: 10.5px;
 }
 
 .ifp-bar-wrap {
   height: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #e0e9e1;
   border-radius: 2px;
   overflow: hidden;
 }
 .ifp-bar {
   height: 100%;
-  background: linear-gradient(90deg, #4f9bff, #22d3ee);
+  background: linear-gradient(90deg, #4e926b, #abd3a3);
   transition: width 0.4s ease-out;
 }
 .is-done .ifp-bar   { background: #22c55e; }
@@ -304,12 +308,12 @@ function locateTask(task: InFlightTask) {
 .ifp-detail {
   margin-top: 4px;
   font-size: 10.5px;
-  color: #f5b800;
+  color: #996a10;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.is-failed .ifp-detail { color: #ff8a8a; }
+.is-failed .ifp-detail { color: #c33d55; }
 
 .ifp-fade-enter-from { opacity: 0; transform: translateY(8px); }
 .ifp-fade-enter-active,

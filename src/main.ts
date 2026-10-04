@@ -7,7 +7,7 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate' // 引入插
 import VueDragSelect from "@coleqiu/vue-drag-select";
 
 
-import './assets/styles/fonts.css'
+import './style.css'
 
 axios.defaults.baseURL = ''
 
@@ -19,7 +19,7 @@ import App from './App.vue'
 
 const app = createApp(App)
 app.use(naive)
-app.use(router)
 app.use(pinia)
+app.use(router)
 app.use(VueDragSelect);
 app.mount('#app')

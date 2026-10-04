@@ -1,5 +1,10 @@
 <template>
   <div
+    tabindex="0"
+    role="group"
+    :aria-label="`${title}，按 Enter 编辑，按空格${selected ? '取消选择' : '选择'}`"
+    @keydown.enter.self.prevent="$emit('menu', image, 'edit')"
+    @keydown.space.self.prevent="$emit('check', image, $event as unknown as MouseEvent)"
     :class="[
       'image-card',
       { 'image-card--selected': selected, 'image-card--needs-attention': attention, 'image-card--has-selection-mode': hasSelection },
@@ -234,7 +239,7 @@ function onMenuSelect(action: string) {
 <style scoped>
 .image-card {
   position: relative;
-  border-radius: 10px;
+  border-radius: 14px;
   overflow: hidden;
   cursor: pointer;
   background: var(--n-card-color);
@@ -347,7 +352,7 @@ function onMenuSelect(action: string) {
   -webkit-backdrop-filter: blur(4px);
 }
 .badge--type-photo  { background: rgba(22, 119, 60, 0.78); color: #d8ffe2; }
-.badge--type-cover  { background: rgba(40, 32, 70, 0.78); color: #e0d5ff; }
+.badge--type-cover  { background: rgba(65, 86, 58, 0.86); color: #e0edd4; }
 .badge--type-other  { background: rgba(60, 60, 60, 0.78); color: #f0f0f0; }
 
 .attention-dot {
@@ -462,4 +467,8 @@ function onMenuSelect(action: string) {
 .more-btn:hover {
   background: rgba(0, 0, 0, 0.78);
 }
+
+.image-card:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
+@media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .image-card, .cover-img { transition: none; } }
 </style>

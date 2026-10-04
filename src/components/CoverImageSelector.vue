@@ -1,6 +1,6 @@
 <template>
   <div class="cover-image-selector">
-    <n-flex vertical style="padding: 0 32px; height: 100%;">
+    <n-flex vertical class="selector-layout">
       <!-- 标题栏 - 固定高度 -->
       <div class="header-section">
         <n-flex justify="space-between" align="center" class="mb-4">
@@ -13,7 +13,7 @@
             v-model:value="selectedCollectionId"
             placeholder="选择合集筛选（可选）"
             clearable
-            style="width: 300px;"
+            style="width: min(300px, 100%);"
             :options="collectionOptions"
             @update:value="handleCollectionChange"
           />
@@ -25,12 +25,21 @@
       
       <!-- 图片网格 - 可滚动区域 -->
       <div class="content-section">
-        <n-grid cols="4" x-gap="16" y-gap="16">
+        <n-alert v-if="loadError" type="error" style="margin-bottom: 14px">{{ loadError }} <n-button text type="error" @click="loadImages">重试</n-button></n-alert>
+        <n-spin :show="loading">
+        <n-empty v-if="!loading && !loadError && !images.length" description="当前没有可用的封面图片" />
+        <n-grid cols="1 360:2 640:3 900:4" responsive="self" x-gap="16" y-gap="16">
           <n-grid-item v-for="img in images" :key="img.id">
             <n-card 
               size="small" 
               hoverable 
               @click="selectCover(img)"
+              role="button"
+              tabindex="0"
+              :aria-label="`选择 ${img.title || img.fileName} 作为封面`"
+              :aria-pressed="selectedCoverId === img.id"
+              @keydown.enter.prevent="selectCover(img)"
+              @keydown.space.prevent="selectCover(img)"
               :class="{ 'selected-cover': selectedCoverId === img.id }"
             >
               <n-flex vertical>
@@ -40,15 +49,18 @@
                     width="100%"
                     height="150px"
                     object-fit="cover"
+                    preview-disabled
+                    :alt="img.title || img.fileName"
                   />
                 </n-flex>
-                <n-flex justify="center">
+                <n-flex justify="center" style="overflow-wrap: anywhere;">
                   {{ img.fileName }}
                 </n-flex>
               </n-flex>
             </n-card>
           </n-grid-item>
         </n-grid>
+        </n-spin>
       </div>
       
       <!-- 底部操作区 - 固定高度 -->
@@ -59,10 +71,12 @@
             v-model:page="page"
             v-model:page-size="pageSize"
             :item-count="itemCount"
+            :disabled="loading"
+            :page-slot="5"
             show-size-picker
             :page-sizes="[10, 20, 50, 100]"
             @update:page="loadImages"
-            @update:page-size="loadImages"
+            @update:page-size="() => { page = 1; loadImages() }"
           />
         </n-flex>
         
@@ -71,7 +85,7 @@
           <n-button 
             type="primary" 
             size="large"
-            :disabled="!selectedCoverId"
+            :disabled="!selectedCoverId || loading"
             @click="confirmSelection"
           >
             确认选择
@@ -83,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { fetchImages, fetchImagesWithCollectionId } from '../api/images'
 import { fetchImageCollectionsIds } from '../api/manager'
 import type { ImageItem } from '../api/images'
@@ -99,8 +113,16 @@ const collectionOptions = ref<{ label: string; value: number }[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 const itemCount = ref(0)
+const loading = ref(false)
+const loadError = ref('')
+let requestSequence = 0
 
 async function loadImages() {
+  const sequence = ++requestSequence
+  loading.value = true
+  loadError.value = ''
+  selectedCoverId.value = null
+  try {
   let res
   if (selectedCollectionId.value) {
     // 如果选择了合集筛选，则只获取该合集的图片
@@ -115,10 +137,13 @@ async function loadImages() {
       pageSize: pageSize.value
     })
   }
-  // @ts-ignore
-  images.value = res.data
-  // @ts-ignore
-  itemCount.value = res.total
+    if (sequence !== requestSequence) return
+    const result = res as unknown as { data: ImageItem[]; total: number }
+    images.value = result.data
+    itemCount.value = result.total
+  } catch {
+    if (sequence === requestSequence) { images.value = []; loadError.value = '封面图片加载失败，请稍后重试。' }
+  } finally { if (sequence === requestSequence) loading.value = false }
 }
 
 async function fetchCollections() {
@@ -151,6 +176,7 @@ function selectCover(img: ImageItem) {
 }
 
 function confirmSelection() {
+  if (loading.value) return
   if (selectedCoverId.value) {
     const selectedImage = images.value.find(img => img.id === selectedCoverId.value)
     if (selectedImage) {
@@ -165,9 +191,12 @@ onMounted(async () => {
     fetchCollections()
   ])
 })
+onBeforeUnmount(() => { requestSequence++ })
 </script>
 
 <style scoped>
+.selector-layout { height: 100%; padding: 0 8px; min-height: 0; }
+.footer-section :deep(.n-pagination) { flex-wrap: wrap; justify-content: center; gap: 6px; }
 .cover-image-selector {
   height: 100%;
   display: flex;
@@ -187,12 +216,12 @@ onMounted(async () => {
 .footer-section {
   flex-shrink: 0; /* 固定高度，不收缩 */
   padding-top: 16px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--admin-border, #e0e9e1);
 }
 
 .selected-cover {
-  background-color: #e6f7ff !important;
-  border: 2px solid #1890ff !important;
+  background-color: var(--admin-accent-soft, #e6f3e9) !important;
+  border: 2px solid var(--admin-accent, #2f7b5b) !important;
   transform: translateY(2px);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }

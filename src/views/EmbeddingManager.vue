@@ -1,5 +1,7 @@
 <template>
-  <div class="scanner-app">
+  <div class="scanner-app admin-page">
+    <header class="embedding-heading admin-page-header"><div><span class="embedding-eyebrow">AI / EMBEDDINGS</span><h1>向量嵌入</h1><p>查看向量覆盖率与运行状态，定位待处理媒体并恢复检索能力。</p></div><n-button secondary :loading="loading || heatmapLoading" @click="refreshStatsAndHeatmap">刷新概览</n-button></header>
+    <n-alert v-if="dataError" type="error" class="embedding-error">{{ dataError }}</n-alert>
     <EmbeddingSpacePanel />
     <div class="runtime-strip">
       <div class="runtime-title"><span class="runtime-dot" :class="runtimeDotClass"></span><strong>Sidecar 运行时</strong><span>{{ runtimeLabel }}</span><code v-if="runtime?.pid">PID {{ runtime.pid }}</code></div>
@@ -8,7 +10,7 @@
         <n-button v-if="runtime?.local && !runtime?.running && !runtime?.adoptedExternal && !runtime?.waitingForPort" size="tiny" type="primary" :loading="runtimeLoading" @click="controlRuntime('start')">启动</n-button>
         <n-button v-else-if="runtime?.local && runtime?.running && !runtime?.adoptedExternal" size="tiny" secondary :loading="runtimeLoading" @click="controlRuntime('restart')">重启</n-button>
         <n-button v-if="runtime?.local && runtime?.running && !runtime?.adoptedExternal" size="tiny" type="error" secondary :loading="runtimeLoading" @click="controlRuntime('stop')">停止</n-button>
-        <n-button size="tiny" quaternary :loading="runtimeLoading" @click="refreshRuntime">刷新</n-button>
+        <n-button size="tiny" quaternary :loading="runtimeRefreshing" :disabled="runtimeLoading" @click="refreshRuntime">刷新</n-button>
       </div>
     </div>
     <!-- =======================  扫描器主窗口  ======================= -->
@@ -79,7 +81,7 @@
           </template>
           <template v-else>等待加载数据…</template>
         </span>
-        <a class="status-detail" @click="loadList">查看明细 ▸</a>
+        <n-button text type="primary" size="small" class="status-detail" @click="showList">查看明细 ▸</n-button>
       </div>
 
       <!-- =====================  主体：画布 + 侧栏  ===================== -->
@@ -110,6 +112,10 @@
             v-for="row in tierRows"
             :key="row.key"
             class="sb-row"
+            role="button"
+            tabindex="0"
+            @keydown.enter="onTierClick(row.key)"
+            @keydown.space.prevent="onTierClick(row.key)"
             :class="{ 'is-zero': row.count === 0 }"
             @click="onTierClick(row.key)"
             :title="row.tip"
@@ -242,14 +248,17 @@
           <n-radio-button :value="0">主路径完成（{{ formatNumber(selectedListStats?.fullDone) }}）</n-radio-button>
         </n-radio-group>
         <n-button size="small" @click="loadList" :loading="listLoading">查询</n-button>
-        <n-button size="small" type="primary" secondary :disabled="!rows.length" :loading="batchRetryLoading" @click="retryCurrentBatch">批量重新嵌入</n-button>
+        <n-button size="small" type="primary" secondary :disabled="!filteredRows.length || listLoading || !!rowActionKey || cellActionLoading" :loading="batchRetryLoading" @click="retryCurrentBatch">重新嵌入筛选结果（{{ filteredRows.length }}）</n-button>
       </n-flex>
+      <div class="list-search"><n-input v-model:value="listKeyword" clearable placeholder="筛选已加载的名称、ID 或 Hash" aria-label="筛选媒体清单" /><span>显示 {{ filteredRows.length }} / {{ rows.length }} 条 · 单次最多加载 100 条</span></div>
+      <n-alert v-if="listError" type="error" style="margin-bottom: 14px">{{ listError }}</n-alert>
 
       <n-data-table
         :columns="columns"
-        :data="rows"
+        :data="filteredRows"
+        :row-key="(row: EmbeddingAdminRow) => row.id"
         :loading="listLoading"
-        :pagination="false"
+        :pagination="{ pageSize: 20, showSizePicker: true, pageSizes: [20, 50, 100] }"
         size="small"
         :scroll-x="720"
       >
@@ -345,8 +354,19 @@ const calibrating = ref(false)
 const batchRetryLoading = ref(false)
 const runtime = ref<any>(null)
 const runtimeLoading = ref(false)
+const runtimeRefreshing = ref(false)
+const dataError = ref('')
+const listError = ref('')
+const listKeyword = ref('')
+const rowActionKey = ref('')
+let disposed = false
+let heatmapSequence = 0
+let listSequence = 0
+let runtimeSequence = 0
+let runtimeRefreshTimeout: ReturnType<typeof setTimeout> | null = null
 let runtimeTimer: ReturnType<typeof setInterval> | null = null
 const rows = ref<EmbeddingAdminRow[]>([])
+const filteredRows = computed(() => rows.value.filter(row => [row.title, row.fileName, row.id, row.hash].join(' ').toLowerCase().includes(listKeyword.value.trim().toLowerCase())))
 const mediaType = ref<'image' | 'video'>('video')
 const heatmapMediaType = ref<'image' | 'video'>('video')
 const sourceFilter = ref<0 | 1 | 2>(2)
@@ -470,18 +490,24 @@ async function refreshCalibration() {
 }
 
 async function refreshRuntime() {
-  try { runtime.value = await getEmbeddingRuntime() as any }
-  catch { runtime.value = { local: true, running: false, lastError: '无法连接 metadata-service' } }
+  if (disposed || runtimeRefreshing.value || runtimeLoading.value) return
+  const sequence = ++runtimeSequence
+  runtimeRefreshing.value = true
+  try { const value = await getEmbeddingRuntime() as any; if (!disposed && sequence === runtimeSequence) runtime.value = value }
+  catch { if (!disposed && sequence === runtimeSequence) runtime.value = { ...runtime.value, lastError: '无法连接服务，请刷新重试' } }
+  finally { runtimeRefreshing.value = false }
 }
 
 async function controlRuntime(action: 'start' | 'stop' | 'restart') {
+  if (runtimeLoading.value || disposed) return
   if (action !== 'start' && !window.confirm(`${action === 'stop' ? '停止' : '重启'} sidecar 可能中断正在处理的任务，确定继续吗？`)) return
   runtimeLoading.value = true
+  runtimeSequence++
   try {
     const fn = action === 'start' ? startEmbeddingRuntime : action === 'stop' ? stopEmbeddingRuntime : restartEmbeddingRuntime
     runtime.value = await fn() as any
     message.success(action === 'start' ? 'sidecar 启动命令已发送' : action === 'stop' ? 'sidecar 已停止' : 'sidecar 重启命令已发送')
-    window.setTimeout(refreshRuntime, 1500)
+    if (!disposed) { if (runtimeRefreshTimeout) clearTimeout(runtimeRefreshTimeout); runtimeRefreshTimeout = setTimeout(() => { if (!document.hidden) void refreshRuntime() }, 1500) }
   } catch (e: any) { message.error('运行时操作失败：' + (e?.message ?? e)); await refreshRuntime() }
   finally { runtimeLoading.value = false }
 }
@@ -608,7 +634,8 @@ function onHeatmapMouseMove(e: MouseEvent) {
 function onTierClick(tier: HeatmapTier) {
   // 点击侧栏色卡时，把下方列表筛选切到对应来源
   sourceFilter.value = tier
-  loadList()
+  mediaType.value = heatmapMediaType.value
+  void nextTick(showList)
 }
 
 // ───────────────────────── 格子选中 / 操作 ─────────────────────────
@@ -664,7 +691,7 @@ function closeSelectedCell() {
 
 async function onCellRetry() {
   const sel = selectedCell.value
-  if (!sel) return
+  if (!sel || cellActionLoading.value || batchRetryLoading.value || rowActionKey.value) return
   cellActionLoading.value = true
   try {
     const r: any = await retryEmbedding(heatmapMediaType.value, sel.id)
@@ -750,16 +777,22 @@ function onWrapScroll() {
 function onMediaChange() {
   // 切换媒体库时，列表媒体也同步，避免上下视图割裂
   mediaType.value = heatmapMediaType.value
+  heatmapPoints.value = []
+  heatmapTotal.value = 0
+  clearHeatTip()
   loadHeatmap()
 }
 
 // ───────────────────────── 数据加载 ─────────────────────────
 async function loadHeatmap() {
+  if (disposed) return
+  const sequence = ++heatmapSequence
   // 重新加载会改变 cells 的索引顺序，旧的 selectedCell.idx 不再可信，先清空
   selectedCell.value = null
   heatmapLoading.value = true
   try {
     const r = await getEmbeddingHeatmap(heatmapMediaType.value, heatmapLimit.value)
+    if (disposed || sequence !== heatmapSequence) return
     const data: any = r as any
     heatmapPoints.value = (data.cells ?? []) as HeatmapPoint[]
     heatmapTotal.value = (data.totalEligible ?? 0) as number
@@ -768,35 +801,36 @@ async function loadHeatmap() {
     await nextTick()
     paintHeatmap()
   } catch (e: any) {
-    message.error('加载热力图失败：' + (e?.message ?? e))
-    heatmapPoints.value = []
-    await nextTick()
-    paintHeatmap()
+    if (!disposed && sequence === heatmapSequence) dataError.value = '分布图暂时无法刷新，已保留上次结果。' + (e?.message ?? '')
   } finally {
-    heatmapLoading.value = false
+    if (sequence === heatmapSequence) heatmapLoading.value = false
   }
 }
 
 async function loadAll() {
+  if (loading.value || disposed) return
   loading.value = true
   try {
     const [p, s, o] = await Promise.all([getEmbeddingProgress(), getEmbeddingSourceStats(), getEmbeddingOverview()])
+    if (disposed) return
     progress.value = p as any
     stats.value = s as any
     overview.value = o as any
   } catch (e: any) {
-    message.error('加载统计失败：' + (e?.message ?? e))
+    if (!disposed) dataError.value = '统计暂时无法刷新，已保留上次结果。' + (e?.message ?? '')
   } finally {
     loading.value = false
   }
 }
 
 async function retryCurrentBatch() {
-  if (!rows.value.length) return
-  if (!window.confirm(`将清空当前结果中的 ${rows.value.length} 条向量并重新投递，确定继续吗？`)) return
+  if (!filteredRows.value.length || batchRetryLoading.value || rowActionKey.value || cellActionLoading.value || listLoading.value) return
+  const ids = filteredRows.value.map(row => row.id)
+  const type = mediaType.value
+  if (!window.confirm(`将清空筛选结果中的 ${ids.length} 条向量并重新投递，确定继续吗？`)) return
   batchRetryLoading.value = true
   try {
-    const result: any = await retryEmbeddingBatch(mediaType.value, rows.value.map(r => r.id))
+    const result: any = await retryEmbeddingBatch(type, ids)
     message.success(`已接受 ${result?.accepted ?? 0} 条，已入队 ${result?.enqueued ?? 0} 条`)
     await Promise.all([loadAll(), loadList(), loadHeatmap()])
   } catch (e: any) { message.error('批量重试失败：' + (e?.message ?? e)) }
@@ -804,18 +838,24 @@ async function retryCurrentBatch() {
 }
 
 async function loadList() {
+  if (disposed) return
+  const sequence = ++listSequence
   listLoading.value = true
   try {
-    rows.value = (await listEmbeddingRows(mediaType.value, sourceFilter.value, 100)) as any
+    const result = (await listEmbeddingRows(mediaType.value, sourceFilter.value, 100)) as any
+    if (disposed || sequence !== listSequence) return
+    rows.value = Array.isArray(result) ? result : []
+    listError.value = ''
   } catch (e: any) {
-    message.error('加载列表失败：' + (e?.message ?? e))
-    rows.value = []
+    if (!disposed && sequence === listSequence) listError.value = '读取清单失败，请重新查询。' + (e?.message ?? '')
   } finally {
-    listLoading.value = false
+    if (sequence === listSequence) listLoading.value = false
   }
 }
 
 async function onRetry(row: EmbeddingAdminRow) {
+  if (rowActionKey.value || batchRetryLoading.value || cellActionLoading.value) return
+  rowActionKey.value = `retry:${row.id}`
   try {
     const r: any = await retryEmbedding(mediaType.value, row.id)
     const affected = r?.affected ?? 0
@@ -831,10 +871,13 @@ async function onRetry(row: EmbeddingAdminRow) {
     }
   } catch (e: any) {
     message.error('重试失败：' + (e?.message ?? e))
-  }
+  } finally { rowActionKey.value = '' }
 }
 
 async function onRetranscode(row: EmbeddingAdminRow) {
+  if (rowActionKey.value || batchRetryLoading.value || cellActionLoading.value) return
+  if (!window.confirm('重转码会重新生成视频版本并重置向量。确认重新处理这条视频？')) return
+  rowActionKey.value = `transcode:${row.id}`
   try {
     const res: any = await retranscodeVideo(row.hash)
     if (res?.ok) {
@@ -846,7 +889,7 @@ async function onRetranscode(row: EmbeddingAdminRow) {
   } catch (e: any) {
     const detail = e?.response?.data?.error ?? e?.message ?? e
     message.error('重转码失败：' + detail)
-  }
+  } finally { rowActionKey.value = '' }
 }
 
 function rowTitle(row: EmbeddingAdminRow): string {
@@ -937,13 +980,13 @@ const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
       const btns = [
         h(
           NButton,
-          { size: 'tiny', type: 'primary', secondary: true, onClick: () => onRetry(row) },
+          { size: 'small', type: 'primary', secondary: true, loading: rowActionKey.value === `retry:${row.id}`, disabled: batchRetryLoading.value || cellActionLoading.value || (!!rowActionKey.value && rowActionKey.value !== `retry:${row.id}`), onClick: () => onRetry(row) },
           { default: () => '重新嵌入' }
         )
       ]
       if (mediaType.value === 'video') {
         btns.push(
-          h(NButton, { size: 'tiny', onClick: () => onRetranscode(row) }, { default: () => '重转码' })
+          h(NButton, { size: 'small', loading: rowActionKey.value === `transcode:${row.id}`, disabled: batchRetryLoading.value || cellActionLoading.value || (!!rowActionKey.value && rowActionKey.value !== `transcode:${row.id}`), onClick: () => onRetranscode(row) }, { default: () => '重转码' })
         )
       }
       if (row.uuid) {
@@ -960,9 +1003,9 @@ const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
 function startAutoRefresh() {
   stopAutoRefresh()
   if (!autoRefresh.value) return
-  const ms = Math.max(10, autoRefreshSec.value) * 1000
+  const ms = Math.max(10, autoRefreshSec.value || 60) * 1000
   autoRefreshTimer = setInterval(() => {
-    refreshStatsAndHeatmap()
+    if (!document.hidden && !loading.value && !heatmapLoading.value) void refreshStatsAndHeatmap()
   }, ms)
 }
 function stopAutoRefresh() {
@@ -980,26 +1023,39 @@ watch(autoRefreshSec, () => {
 })
 
 watch([mediaType, sourceFilter], () => {
+  rows.value = []
+  listKeyword.value = ''
   loadList()
 })
 
 // ───────────────────────── 入口 ─────────────────────────
 async function refreshStatsAndHeatmap() {
-  await loadAll()
-  await loadHeatmap()
+  if (disposed || loading.value || heatmapLoading.value) return
+  dataError.value = ''
+  await Promise.all([loadAll(), loadHeatmap()])
 }
 
-onMounted(async () => {
+function showList() {
+  void loadList()
+  document.querySelector('.list-card')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+}
+
+onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('mousedown', onDocClick)
-  await refreshStatsAndHeatmap()
-  await refreshRuntime()
-  runtimeTimer = setInterval(refreshRuntime, 5000)
-  await refreshCalibration()
-  loadList()
+  void refreshStatsAndHeatmap()
+  void refreshRuntime()
+  runtimeTimer = setInterval(() => { if (!document.hidden) void refreshRuntime() }, 5000)
+  void refreshCalibration()
+  void loadList()
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  heatmapSequence++
+  listSequence++
+  runtimeSequence++
+  if (runtimeRefreshTimeout) clearTimeout(runtimeRefreshTimeout)
   if (runtimeTimer) {
     clearInterval(runtimeTimer)
     runtimeTimer = null
@@ -1015,16 +1071,16 @@ onBeforeUnmount(() => {
    整体页面 & 「窗口」外壳
    ========================================================== */
 .scanner-app {
-  padding: 16px;
+  padding: 28px 32px 48px;
   max-width: 1480px;
   margin: 0 auto;
 }
 
 .scanner-window {
-  border: 1px solid #b8b8b8;
-  border-radius: 4px;
-  background: #f5f5f0;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--n-divider-color);
+  border-radius: 14px;
+  background: var(--n-card-color);
+  box-shadow: 0 4px 16px rgba(41, 74, 48, 0.03);
   overflow: hidden;
   margin-bottom: 16px;
 }
@@ -1036,11 +1092,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  background: linear-gradient(to bottom, #d8d4c4 0%, #c0bca8 100%);
-  border-bottom: 1px solid #a8a48f;
-  font-size: 13px;
+  min-height: 56px;
+  padding: 0 20px;
+  background: var(--n-card-color);
+  border-bottom: 1px solid var(--n-divider-color);
+  font-size: 15px;
   color: #2a2a2a;
   user-select: none;
 }
@@ -1067,7 +1123,7 @@ onBeforeUnmount(() => {
   color: #1a1a1a;
 }
 .title-stat strong {
-  color: #2563eb;
+  color: var(--admin-accent, #2f7b5b);
   font-weight: 600;
 }
 
@@ -1075,33 +1131,36 @@ onBeforeUnmount(() => {
    工具栏（紧凑米色背景）
    ========================================================== */
 .window-toolbar {
-  padding: 8px 14px;
-  background: #fffbe8;
-  border-bottom: 1px solid #e6dcc4;
+  padding: 14px 20px;
+  background: var(--admin-bg, #f5f9f5);
+  border-bottom: 1px solid var(--n-divider-color);
 }
 
 .overview-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr)) minmax(260px, 2fr);
+  grid-template-columns: repeat(4, minmax(100px, 1fr)) minmax(230px, 2fr);
   gap: 1px;
-  background: #d8d8d8;
-  border-bottom: 1px solid #d0d0d0;
+  background: var(--n-divider-color);
+  border-bottom: 1px solid var(--n-divider-color);
 }
 .runtime-strip {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 42px;
-  padding: 6px 14px;
-  background: #111827;
-  color: #e5e7eb;
+  min-height: 56px;
+  padding: 12px 20px;
+  background: var(--n-card-color);
+  color: var(--n-text-color-2);
+  border: 1px solid var(--n-divider-color);
+  border-radius: 14px;
+  margin-bottom: 20px;
   font-size: 12px;
 }
 .runtime-title, .runtime-meta, .runtime-actions { display: flex; align-items: center; gap: 8px; }
-.runtime-title strong { color: #fff; }
+.runtime-title strong { color: var(--n-text-color); }
 .runtime-title code { color: #9ca3af; font-family: ui-monospace, monospace; }
 .runtime-meta { flex: 1; color: #9ca3af; min-width: 0; }
-.runtime-error { color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-error { color: #c33d55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
 .runtime-dot.is-ready { background: #22c55e; }
 .runtime-dot.is-busy { background: #f59e0b; animation: runtime-pulse 1.4s ease-in-out infinite; }
@@ -1112,8 +1171,8 @@ onBeforeUnmount(() => {
   .runtime-meta { flex-basis: 100%; order: 3; }
 }
 .overview-item, .overview-model {
-  min-height: 58px;
-  padding: 9px 12px;
+  min-height: 76px;
+  padding: 15px 18px;
   background: #fff;
   display: flex;
   align-items: baseline;
@@ -1122,7 +1181,7 @@ onBeforeUnmount(() => {
 .overview-item { flex-wrap: wrap; }
 .overview-k { color: #6b7280; font-size: 11px; width: 100%; }
 .overview-item strong { font-size: 20px; line-height: 1; color: #15803d; font-family: ui-monospace, monospace; }
-.overview-item strong.is-blue { color: #2563eb; }
+.overview-item strong.is-blue { color: var(--admin-accent, #2f7b5b); }
 .overview-item strong.is-red { color: #dc2626; }
 .overview-item small { color: #6b7280; font-size: 11px; }
 .overview-model { align-items: center; flex-wrap: wrap; color: #4b5563; font-size: 12px; }
@@ -1217,7 +1276,7 @@ onBeforeUnmount(() => {
   margin-left: 6px;
 }
 .status-detail {
-  color: #2563eb;
+  color: var(--admin-accent, #2f7b5b);
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
@@ -1304,9 +1363,10 @@ onBeforeUnmount(() => {
   z-index: 999;
   width: 280px;
   background: #fff;
-  border: 1px solid #c8c8c8;
-  border-radius: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--n-divider-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(41, 74, 48, 0.18);
+  animation: pop-in .15s ease-out;
   font-size: 12px;
   overflow: hidden;
   user-select: none;
@@ -1316,8 +1376,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: linear-gradient(to bottom, #f0eee2 0%, #e6e3d4 100%);
-  border-bottom: 1px solid #d8d4c4;
+  background: var(--admin-hover, #f0f7ef);
+  border-bottom: 1px solid var(--n-divider-color);
 }
 .cp-swatch {
   width: 14px;
@@ -1384,10 +1444,10 @@ onBeforeUnmount(() => {
 .status-sidebar {
   width: 168px;
   flex-shrink: 0;
-  background: #fafaf6;
-  border: 1px solid #d8d8d8;
+  background: var(--admin-bg, #f5f9f5);
+  border: 1px solid var(--n-divider-color);
   border-left: none;
-  padding: 6px 10px 8px;
+  padding: 12px;
   font-size: 12px;
   display: flex;
   flex-direction: column;
@@ -1397,13 +1457,14 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr 14px auto;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  padding: 10px 4px;
+  border-radius: 8px;
   cursor: pointer;
   border-bottom: 1px dashed transparent;
   transition: background 0.12s;
 }
 .sb-row:hover {
-  background: #fff7d6;
+  background: var(--admin-accent-soft, #e6f3e9);
 }
 .sb-row.is-zero {
   opacity: 0.55;
@@ -1464,8 +1525,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  padding: 6px 14px;
-  background: #fafaf6;
+  padding: 12px 20px;
+  background: var(--admin-bg, #f5f9f5);
   border-bottom: 1px solid #e0e0e0;
   font-size: 11.5px;
   color: #4a4a4a;
@@ -1498,8 +1559,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  background: #f0eee2;
+  padding: 16px 20px;
+  background: var(--n-card-color);
   flex-wrap: wrap;
 }
 .actions-divider {
@@ -1515,10 +1576,10 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 12px;
   padding: 4px 10px;
-  background: linear-gradient(to bottom, #1f4f1f 0%, #143614 100%);
-  color: #b3ffb3;
-  border: 1px solid #0d2a0d;
-  border-radius: 3px;
+  background: #eef6f2;
+  color: #267354;
+  border: 1px solid #d7e9df;
+  border-radius: 8px;
   font-family: ui-monospace, monospace;
   font-size: 11.5px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -1529,21 +1590,21 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 .m-key {
-  color: #7fc97f;
+  color: #56836e;
   font-size: 11px;
 }
 .m-val {
-  color: #d6ffd6;
+  color: #267354;
   font-weight: 600;
 }
 .m-val.is-good {
-  color: #b3ffb3;
+  color: #267354;
 }
 .m-val.is-warn {
-  color: #ffe177;
+  color: #a76e09;
 }
 .m-val.is-bad {
-  color: #ffadad;
+  color: #c33d55;
 }
 
 /* ===========================================================
@@ -1656,4 +1717,12 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(0, 0, 0, 0.2);
   flex-shrink: 0;
 }
+.embedding-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; }
+.list-card :deep(.n-radio-group) { display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; }
+.embedding-eyebrow { color: var(--n-text-color-3); font-size: 11px; font-weight: 700; letter-spacing: 1.4px; }.embedding-heading h1 { font-size: 26px; margin: 7px 0 8px; }.embedding-heading p { margin: 0; color: var(--n-text-color-3); font-size: 13px; }.embedding-error { margin-bottom: 20px; }
+.list-card { scroll-margin-top: 24px; border-radius: 14px; }.list-search { display: flex; align-items: center; gap: 16px; margin: 18px 0; }.list-search .n-input { max-width: 340px; }.list-search span { color: var(--n-text-color-3); font-size: 12px; }.status-main { min-width: 0; }.status-detail { margin: 0; }.runtime-title { flex-wrap: wrap; }.sb-row:focus-visible,.cp-close:focus-visible { outline: 2px solid var(--admin-accent, #2f7b5b); outline-offset: 2px; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media(max-width:1100px) { .overview-strip { grid-template-columns: repeat(4,minmax(0,1fr)); }.overview-model { grid-column: 1 / -1; } }
+@media(max-width:700px) { .scanner-app { padding: 20px 16px 40px; }.embedding-heading { flex-direction: column; align-items: flex-start; }.window-titlebar { flex-wrap: wrap; padding: 12px 16px; }.title-spacer { display: none; }.title-stat { width: 100%; }.overview-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }.overview-item { padding: 14px; }.window-main { flex-direction: column; }.status-sidebar { width: auto; border-left: 1px solid var(--n-divider-color); }.canvas-frame { width: 100%; box-sizing: border-box; }.list-search { flex-direction: column; align-items: flex-start; }.list-search .n-input { max-width: none; }.explain li { display: block; }.explain .dot { margin-right: 6px; }.runtime-strip { padding: 14px; }.runtime-title { flex-wrap: wrap; }.window-toolbar,.window-info,.window-actions { padding-left: 14px; padding-right: 14px; } }
+@media(prefers-reduced-motion:reduce) { .cell-popover,.runtime-dot.is-busy,.status-dot.is-busy { animation: none; }.sb-row { transition: none; } }
 </style>

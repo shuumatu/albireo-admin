@@ -1,7 +1,7 @@
 <template>
   <n-drawer
     :show="show"
-    :width="540"
+    width="min(540px, 100vw)"
     placement="right"
     :mask-closable="true"
     :close-on-esc="true"
@@ -62,10 +62,10 @@
 
       <template #footer>
         <n-flex justify="space-between" align="center" style="width: 100%;">
-          <span class="save-status">
+          <span class="save-status" role="status" aria-live="polite">
             <span v-if="saveStatus === 'saving'">保存中…</span>
             <span v-else-if="saveStatus === 'saved'">已保存于 {{ savedAtText }}</span>
-            <span v-else-if="saveStatus === 'error'" style="color: var(--n-error-color);">保存失败：{{ saveError }}</span>
+            <span v-else-if="saveStatus === 'error'" style="color: var(--n-error-color);">保存失败：{{ saveError }} <n-button text size="tiny" type="error" @click="saveField({ ...form })">重试</n-button></span>
           </span>
           <n-flex :size="6">
             <n-popconfirm @positive-click="$emit('delete')">
@@ -164,21 +164,26 @@
               multiple
               filterable
               clearable
+              :loading="collectionsLoading || collectionsSaving"
+              :disabled="collectionsLoading || collectionsSaving || !!collectionsError"
               :options="collectionOptions"
               placeholder="选择合集"
               @update:value="onCollectionsChange"
             />
+            <p v-if="collectionsError" class="hint" role="alert">{{ collectionsError }} <n-button text size="small" type="primary" @click="loadCollections">重新加载</n-button></p>
           </div>
         </div>
 
         <!-- 位置 / EXIF 用 tabs 折叠避免抽屉太长 -->
         <n-tabs type="line" size="small" :default-value="'location'">
           <n-tab-pane name="location" tab="位置">
+            <p v-if="locationError" class="hint" role="alert">{{ locationError }}</p>
             <p v-if="!locationLoaded" class="hint">点击下方按钮加载该图片的 GPS 位置（无位置时可在地图上自行选点）。</p>
             <n-button
               v-if="!locationLoaded"
               size="small"
               :loading="locationLoading"
+              :disabled="locationSaving"
               @click="ensureLocationLoaded"
             >
               加载位置
@@ -190,16 +195,18 @@
                 height="420px"
               />
               <n-flex justify="flex-end" style="margin-top: 8px;">
-                <n-button size="small" :loading="locationSaving" @click="onLocationSave">保存位置</n-button>
+                <n-button size="small" :loading="locationSaving" :disabled="locationLoading || !locationModel" @click="onLocationSave">保存位置</n-button>
               </n-flex>
             </template>
           </n-tab-pane>
           <n-tab-pane name="exif" tab="EXIF">
+            <p v-if="exifError" class="hint" role="alert">{{ exifError }}</p>
             <p v-if="!exifLoaded" class="hint">点击下方按钮加载摄影元数据；尚无数据时可直接填写后保存。</p>
             <n-button
               v-if="!exifLoaded"
               size="small"
               :loading="exifLoading"
+              :disabled="exifSaving"
               @click="ensureExifLoaded"
             >
               加载 EXIF
@@ -218,7 +225,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import {
   NDrawer,
   NDrawerContent,
@@ -267,13 +274,13 @@ const message = useMessage()
 
 interface LocalForm {
   visibility: 'private' | 'public'
-  title: string | null
-  description: string | null
-  type: string | null
+  title: string
+  description: string
+  type: string
   shotAt: string | null
 }
-const form = ref<LocalForm>({ visibility: 'private', title: null, description: null, type: null, shotAt: null })
-const initialForm = ref<LocalForm>({ visibility: 'private', title: null, description: null, type: null, shotAt: null })
+const form = ref<LocalForm>({ visibility: 'private', title: '', description: '', type: 'photo', shotAt: null })
+const initialForm = ref<LocalForm>({ visibility: 'private', title: '', description: '', type: 'photo', shotAt: null })
 
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const saveError = ref('')
@@ -295,6 +302,10 @@ const createdAtText = computed(() => {
 // ---------- 合集状态 ----------
 const selectedCollectionIds = ref<number[]>([])
 const initialCollectionIds = ref<number[]>([])
+const collectionsLoading = ref(false)
+const collectionsError = ref('')
+const collectionSaveIds = ref(new Set<number>())
+const collectionsSaving = computed(() => props.image != null && collectionSaveIds.value.has(props.image.id))
 const collectionOptions = computed(() =>
   props.collections.map((c) => ({ label: c.name, value: c.id }))
 )
@@ -302,20 +313,39 @@ const collectionOptions = computed(() =>
 // ---------- 位置（懒加载） ----------
 const locationLoaded = ref(false)
 const locationLoading = ref(false)
-const locationSaving = ref(false)
+const locationSaveIds = ref(new Set<number>())
+const locationSaving = computed(() => props.image != null && locationSaveIds.value.has(props.image.id))
+const locationError = ref('')
 const locationModel = ref<{ lat: number; lng: number } | null>(null)
 
 // ---------- EXIF（懒加载） ----------
 const exifLoaded = ref(false)
 const exifLoading = ref(false)
-const exifSaving = ref(false)
+const exifSaveIds = ref(new Set<number>())
+const exifSaving = computed(() => props.image != null && exifSaveIds.value.has(props.image.id))
+const exifError = ref('')
 const exifData = ref<ExifData>({})
+let drawerGeneration = 0
+let disposed = false
+function isCurrent(id: number, generation: number) {
+  return !disposed && props.show && props.image?.id === id && drawerGeneration === generation
+}
 
 const shotAtMs = computed<number | null>(() => {
   if (!form.value.shotAt) return null
   const t = Date.parse(form.value.shotAt)
   return Number.isFinite(t) ? t : null
 })
+let titleTimer: number | null = null
+let descTimer: number | null = null
+let saveQueue: Promise<void> = Promise.resolve()
+const fieldSaveStates = new Map<number, { pending: number; errors: Map<string, string>; savedAt: Date | null; queued: Partial<LocalForm> }>()
+function fieldNeedsSave(field: keyof LocalForm, id = props.image?.id) {
+  const state = id == null ? undefined : fieldSaveStates.get(id)
+  const baseline = state?.pending && Object.prototype.hasOwnProperty.call(state.queued, field)
+    ? state.queued[field] : initialForm.value[field]
+  return form.value[field] !== baseline
+}
 
 /**
  * 当 image 切换或抽屉打开时，重置表单 + 重新拉关联数据。
@@ -324,8 +354,30 @@ const shotAtMs = computed<number | null>(() => {
  * 后端老数据 props.image.collections 可能为 null，必须主动拉一次保证编辑准确。
  */
 watch(
-  () => [props.show, props.image?.id] as const,
-  async ([show, _id]) => {
+  [() => props.show, () => props.image?.id],
+  ([show, _id], previous) => {
+    if (previous?.[0] && previous[1] != null) {
+      const patch: Partial<LocalForm> = {}
+      if (fieldNeedsSave('title', previous[1])) patch.title = form.value.title
+      if (fieldNeedsSave('description', previous[1])) patch.description = form.value.description
+      if (Object.keys(patch).length) void saveField(patch, previous[1])
+    }
+    if (titleTimer) window.clearTimeout(titleTimer)
+    if (descTimer) window.clearTimeout(descTimer)
+    titleTimer = descTimer = null
+    drawerGeneration++
+    locationLoaded.value = false
+    locationLoading.value = false
+    locationError.value = ''
+    locationModel.value = null
+    exifLoaded.value = false
+    exifLoading.value = false
+    exifError.value = ''
+    exifData.value = {}
+    selectedCollectionIds.value = []
+    initialCollectionIds.value = []
+    collectionsLoading.value = false
+    collectionsError.value = ''
     if (!show || !props.image) return
     const v = props.image
     form.value = {
@@ -336,36 +388,41 @@ watch(
       shotAt: v.shotAt ?? null,
     }
     initialForm.value = { ...form.value }
+    form.value = { ...form.value, ...fieldSaveStates.get(v.id)?.queued }
     saveStatus.value = 'idle'
+    refreshSaveStatus(v.id)
     coverFailed.value = false
-
-    // 重置懒加载状态——切换图片后位置 / EXIF 都要重新加载
-    locationLoaded.value = false
-    locationModel.value = null
-    exifLoaded.value = false
-    exifData.value = {}
 
     // 合集：优先用 props 上挂的，没有就调接口补一次
     if (v.collections && v.collections.length >= 0) {
       selectedCollectionIds.value = v.collections.map((c) => c.id)
       initialCollectionIds.value = [...selectedCollectionIds.value]
     } else {
-      try {
-        const res = await fetchCollectionsWithImageId(v.id)
-        const ids = (res.data ?? []).map((c) => c.id)
-        selectedCollectionIds.value = ids
-        initialCollectionIds.value = [...ids]
-      } catch (err) {
-        console.warn('加载图片合集关联失败', err)
-        selectedCollectionIds.value = []
-        initialCollectionIds.value = []
-      }
+      void loadCollections()
     }
   },
-  { immediate: false }
+  { immediate: true }
 )
 
-let titleTimer: number | null = null
+async function loadCollections() {
+  if (!props.image || collectionsLoading.value || collectionsSaving.value) return
+  const id = props.image.id
+  const generation = drawerGeneration
+  collectionsLoading.value = true
+  collectionsError.value = ''
+  try {
+    const res = await fetchCollectionsWithImageId(id)
+    if (!isCurrent(id, generation)) return
+    const ids = (res.data ?? []).map(c => c.id)
+    selectedCollectionIds.value = ids
+    initialCollectionIds.value = [...ids]
+  } catch (err: any) {
+    if (isCurrent(id, generation)) collectionsError.value = `合集加载失败：${err?.message ?? '请重试'}`
+  } finally {
+    if (isCurrent(id, generation)) collectionsLoading.value = false
+  }
+}
+
 function onTitleInput(v: string) {
   form.value.title = v
   if (titleTimer) window.clearTimeout(titleTimer)
@@ -376,11 +433,10 @@ function flushTitle() {
     window.clearTimeout(titleTimer)
     titleTimer = null
   }
-  if (form.value.title === initialForm.value.title) return
+  if (!fieldNeedsSave('title')) return
   saveField({ title: form.value.title })
 }
 
-let descTimer: number | null = null
 function onDescriptionUpdate(v: string) {
   form.value.description = v
   if (descTimer) window.clearTimeout(descTimer)
@@ -391,7 +447,7 @@ function flushDescription() {
     window.clearTimeout(descTimer)
     descTimer = null
   }
-  if (form.value.description === initialForm.value.description) return
+  if (!fieldNeedsSave('description')) return
   saveField({ description: form.value.description })
 }
 
@@ -402,7 +458,7 @@ function onVisibilityChange(value: 'private' | 'public') {
 
 function onTypeChange(v: string) {
   form.value.type = v
-  if (v === initialForm.value.type) return
+  if (!fieldNeedsSave('type')) return
   saveField({ type: v })
 }
 
@@ -416,48 +472,68 @@ function onShotAtChange(ms: number | null) {
  * 失败时保留 form 当前值（不回滚），但 saveStatus 切到 error 让用户可见——
  * 用户可以下一次输入再触发一次 saveField；与 video drawer 行为对齐。
  */
-async function saveField(patch: Partial<LocalForm>) {
-  if (!props.image) return
-  const id = props.image.id
-  saveStatus.value = 'saving'
-  saveError.value = ''
-  try {
-    await updateImage(id, {
-      visibility: patch.visibility,
-      title: patch.title ?? undefined,
-      description: patch.description ?? undefined,
-      type: patch.type ?? undefined,
-      shotAt: patch.shotAt ?? undefined,
-    })
-    initialForm.value = { ...form.value }
-    saveStatus.value = 'saved'
-    savedAt.value = new Date()
-    emit('patched', id, {
-      visibility: form.value.visibility,
-      title: form.value.title,
-      description: form.value.description,
-      type: form.value.type ?? undefined,
-      shotAt: form.value.shotAt,
-    })
-  } catch (err: any) {
-    saveStatus.value = 'error'
-    saveError.value = err?.message ?? '未知错误'
-  }
+function refreshSaveStatus(id: number) {
+  if (disposed || !props.show || props.image?.id !== id) return
+  const state = fieldSaveStates.get(id)
+  if (!state) return
+  saveStatus.value = state.pending ? 'saving' : state.errors.size ? 'error' : 'saved'
+  saveError.value = [...state.errors.values()][0] ?? ''
+  savedAt.value = state.savedAt
 }
+async function saveField(patch: Partial<LocalForm>, id = props.image?.id) {
+  if (id == null) return
+  const snapshot = { ...patch }
+  const state = fieldSaveStates.get(id) ?? { pending: 0, errors: new Map<string, string>(), savedAt: null, queued: {} }
+  fieldSaveStates.set(id, state)
+  state.queued = { ...state.queued, ...snapshot }
+  state.pending++
+  refreshSaveStatus(id)
+  saveQueue = saveQueue.then(async () => {
+    try {
+      await updateImage(id, snapshot)
+      emit('patched', id, snapshot)
+      for (const field of Object.keys(snapshot)) state.errors.delete(field)
+      state.savedAt = new Date()
+      if (disposed || props.image?.id !== id || !props.show) return
+      initialForm.value = { ...initialForm.value, ...snapshot }
+    } catch (err: any) {
+      for (const field of Object.keys(snapshot)) state.errors.set(field, err?.message ?? '未知错误')
+      if (!disposed && (props.image?.id !== id || !props.show)) {
+        message.error(`保存失败：${err?.message ?? '未知错误'}`)
+      }
+    } finally {
+      state.pending--
+      if (!state.pending) {
+        state.queued = Object.fromEntries(Object.entries(state.queued).filter(([field]) => state.errors.has(field)))
+      }
+      refreshSaveStatus(id)
+    }
+  })
+  await saveQueue
+}
+
+onBeforeUnmount(() => {
+  flushTitle()
+  flushDescription()
+  disposed = true
+  drawerGeneration++
+})
 
 /**
  * 合集变更：与原 ImageManager.handleSave 的 diff 逻辑同形态——
  * 计算 added / removed 后分两次接口调用；任一失败都给 message.error，但保留另一边已成功的部分。
  */
 async function onCollectionsChange(ids: number[]) {
-  if (!props.image) return
+  if (!props.image || collectionsLoading.value || collectionsSaving.value || collectionsError.value) return
   const id = props.image.id
+  const generation = drawerGeneration
   const before = new Set(initialCollectionIds.value)
   const after = new Set(ids)
   const toAdd = ids.filter((i) => !before.has(i))
   const toRemove = initialCollectionIds.value.filter((i) => !after.has(i))
 
-  selectedCollectionIds.value = ids
+  selectedCollectionIds.value = [...ids]
+  collectionSaveIds.value.add(id)
   try {
     if (toAdd.length > 0) {
       await addImagesToCollections({ imageIds: [id], collectionIds: toAdd })
@@ -465,78 +541,97 @@ async function onCollectionsChange(ids: number[]) {
     if (toRemove.length > 0) {
       await removeImagesFromCollections({ imageIds: [id], collectionIds: toRemove })
     }
-    initialCollectionIds.value = [...ids]
+    if (isCurrent(id, generation)) initialCollectionIds.value = [...ids]
     emit('collections-changed', id, ids)
   } catch (err: any) {
-    message.error(`合集更新失败：${err?.message ?? '未知错误'}`)
+    if (!disposed) message.error(`合集更新失败：${err?.message ?? '未知错误'}`)
     // 失败时刷新一下选中（让 UI 与后端真实状态尽量同步）
     try {
       const res = await fetchCollectionsWithImageId(id)
       const fresh = (res.data ?? []).map((c) => c.id)
-      selectedCollectionIds.value = fresh
-      initialCollectionIds.value = [...fresh]
-    } catch (_) { /* 忽略 */ }
+      emit('collections-changed', id, fresh)
+      if (isCurrent(id, generation)) {
+        selectedCollectionIds.value = fresh
+        initialCollectionIds.value = [...fresh]
+      }
+    } catch (_) {
+      if (isCurrent(id, generation)) collectionsError.value = '未能确认合集的最新状态，请重新加载后再编辑。'
+    }
+  } finally {
+    collectionSaveIds.value.delete(id)
+    if (!disposed && props.show && props.image?.id === id && generation !== drawerGeneration) void loadCollections()
   }
 }
 
 // ---------- 位置 ----------
 async function ensureLocationLoaded() {
-  if (!props.image) return
+  if (!props.image || locationLoading.value || locationSaving.value) return
+  const { id, uuid } = props.image
+  const generation = drawerGeneration
   locationLoading.value = true
+  locationError.value = ''
   try {
-    const loc = await fetchImageLocation(props.image.uuid)
+    const loc = await fetchImageLocation(uuid)
+    if (!isCurrent(id, generation)) return
     locationModel.value = loc ? { lat: loc.latitude, lng: loc.longitude } : null
     locationLoaded.value = true
   } catch (err: any) {
-    message.error(`加载位置失败：${err?.message ?? '未知错误'}`)
+    if (isCurrent(id, generation)) locationError.value = `加载位置失败：${err?.message ?? '请重试'}`
   } finally {
-    locationLoading.value = false
+    if (isCurrent(id, generation)) locationLoading.value = false
   }
 }
 async function onLocationSave() {
-  if (!props.image) return
+  if (!props.image || !locationLoaded.value || locationLoading.value || locationSaving.value) return
   if (!locationModel.value) {
     message.warning('请先在地图上选择位置')
     return
   }
-  locationSaving.value = true
+  const { id, uuid } = props.image
+  const generation = drawerGeneration
+  const payload = { longitude: locationModel.value.lng, latitude: locationModel.value.lat }
+  locationSaveIds.value.add(id)
   try {
-    await updateImageLocation(props.image.uuid, {
-      longitude: locationModel.value.lng,
-      latitude: locationModel.value.lat,
-    })
-    message.success('位置已保存')
+    await updateImageLocation(uuid, payload)
+    if (isCurrent(id, generation)) message.success('位置已保存')
   } catch (err: any) {
-    message.error(`位置保存失败：${err?.message ?? '未知错误'}`)
+    if (!disposed) message.error(`位置保存失败：${err?.message ?? '未知错误'}`)
   } finally {
-    locationSaving.value = false
+    locationSaveIds.value.delete(id)
   }
 }
 
 // ---------- EXIF ----------
 async function ensureExifLoaded() {
-  if (!props.image) return
+  if (!props.image || exifLoading.value || exifSaving.value) return
+  const { id, uuid } = props.image
+  const generation = drawerGeneration
   exifLoading.value = true
+  exifError.value = ''
   try {
-    const data = await fetchImageExif(props.image.uuid)
+    const data = await fetchImageExif(uuid)
+    if (!isCurrent(id, generation)) return
     exifData.value = data ?? {}
     exifLoaded.value = true
   } catch (err: any) {
-    message.error(`加载 EXIF 失败：${err?.message ?? '未知错误'}`)
+    if (isCurrent(id, generation)) exifError.value = `加载 EXIF 失败：${err?.message ?? '请重试'}`
   } finally {
-    exifLoading.value = false
+    if (isCurrent(id, generation)) exifLoading.value = false
   }
 }
 async function onExifSave() {
-  if (!props.image) return
-  exifSaving.value = true
+  if (!props.image || !exifLoaded.value || exifLoading.value || exifSaving.value) return
+  const { id, uuid } = props.image
+  const generation = drawerGeneration
+  const payload = { ...exifData.value }
+  exifSaveIds.value.add(id)
   try {
-    await updateImageExif(props.image.uuid, exifData.value)
-    message.success('EXIF 已保存')
+    await updateImageExif(uuid, payload)
+    if (isCurrent(id, generation)) message.success('EXIF 已保存')
   } catch (err: any) {
-    message.error(`EXIF 保存失败：${err?.message ?? '未知错误'}`)
+    if (!disposed) message.error(`EXIF 保存失败：${err?.message ?? '未知错误'}`)
   } finally {
-    exifSaving.value = false
+    exifSaveIds.value.delete(id)
   }
 }
 </script>

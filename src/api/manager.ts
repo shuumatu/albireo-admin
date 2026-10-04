@@ -1,4 +1,5 @@
 import request from "../utils/request";
+import { normalizeCollectionPage } from '../utils/collectionPage'
 
 // 分页查询参数接口
 
@@ -152,12 +153,14 @@ interface CollectionsManagerResponse {
 }
 
 
-export function fetchCollections(params:CollectionsManagerParams={}){
-  return request.get<CollectionsManagerResponse[]>('/collection/video/manager-list', { params })
+export async function fetchCollections(params:CollectionsManagerParams={}){
+  const response = await request.get<unknown, unknown>('/collection/video/manager-list', { params })
+  return normalizeCollectionPage<CollectionsManagerResponse>(response)
 }
 
-export function fetchImageCollections(params:CollectionsManagerParams={}){
-  return request.get<CollectionsManagerResponse[]>('/collection/image/manager-list', { params })
+export async function fetchImageCollections(params:CollectionsManagerParams={}){
+  const response = await request.get<unknown, unknown>('/collection/image/manager-list', { params })
+  return normalizeCollectionPage<CollectionsManagerResponse>(response)
 }
 
 // 添加获取合集视频的接口函数
@@ -178,8 +181,8 @@ export function deleteVideos(videoIds: number[]){
 }
 
 interface VideoParams {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   shotAt?: string | null;
   visibility?: string | null;
 }

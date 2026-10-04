@@ -1,48 +1,52 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Upload from '../views/Upload.vue'
-import VideoMetaManager from '../views/VideoMetaManager.vue'
-import Map from '../views/Map.vue'
-import DefaultPage from '../views/defaultPage.vue'
-import CollectionManager from '../views/CollectionManager.vue'
-import CollectionDetail from '../views/CollectionDetail.vue'
-import ImageManager from '../views/image/ImageListPage.vue'
-import TagManager from '../views/TagManager.vue'
-import SystemConfigManager from '../views/SystemConfigManager.vue'
-import CommentManager from '../views/CommentManager.vue'
-import ShareManager from '../views/ShareManager.vue'
-import LoginPage from '../views/LoginPage.vue'
-import UserProfile from '../views/UserProfile.vue'
-import TaskProgress from '../views/TaskProgress.vue'
-import VisionModelManager from '../views/VisionModelManager.vue'
-import EmbeddingManager from '../views/EmbeddingManager.vue'
-import ReprocessManager from '../views/ReprocessManager.vue'
+const Upload = () => import('../views/Upload.vue')
+const VideoMetaManager = () => import('../views/VideoMetaManager.vue')
+const Map = () => import('../views/Map.vue')
+const DefaultPage = () => import('../views/defaultPage.vue')
+const CollectionManager = () => import('../views/CollectionManager.vue')
+const CollectionDetail = () => import('../views/CollectionDetail.vue')
+const ImageManager = () => import('../views/image/ImageListPage.vue')
+const TagManager = () => import('../views/TagManager.vue')
+const SystemConfigManager = () => import('../views/SystemConfigManager.vue')
+const CommentManager = () => import('../views/CommentManager.vue')
+const ShareManager = () => import('../views/ShareManager.vue')
+const LoginPage = () => import('../views/LoginPage.vue')
+const UserProfile = () => import('../views/UserProfile.vue')
+const TaskProgress = () => import('../views/TaskProgress.vue')
+const VisionModelManager = () => import('../views/VisionModelManager.vue')
+const EmbeddingManager = () => import('../views/EmbeddingManager.vue')
+const ReprocessManager = () => import('../views/ReprocessManager.vue')
 
 const routes = [
     {
         path: '/login',
         name: 'login',
         component: LoginPage,
-        meta: { public: true }
+        meta: { public: true, title: '管理员登录' }
     },
     {
         path: '/',
         name: 'home',
+        meta: { title: '工作台' },
         component: DefaultPage
     },
     {
     path: '/upload',
     name: 'upload',
+    meta: { title: '上传素材' },
     component: Upload
     },
     {
         path: '/manager/video',
         name:'videoManager',
+        meta: { title: '视频管理' },
         component: VideoMetaManager
 
     },
     {
         path:'/manager/image',
         name:'imageManager',
+        meta: { title: '图片管理' },
         component: ImageManager
     },
     {
@@ -108,6 +112,7 @@ const routes = [
     {
         path: '/map',
         name:'map',
+        meta: { title: '媒体地图' },
         component: Map
     },
     {
@@ -115,7 +120,8 @@ const routes = [
         name: 'profile',
         meta: { title: '个人设置' },
         component: UserProfile
-    }
+    },
+    { path: '/:pathMatch(.*)*', name: 'notFound', component: () => import('../views/NotFound.vue'), meta: { title: '页面未找到' } }
 ]
 
 const router = createRouter({
@@ -132,10 +138,12 @@ router.beforeEach((to, _from, next) => {
       next()
     }
   } else if (!token) {
-    next('/login')
+    next({ path: '/login', query: { redirect: to.fullPath } })
   } else {
     next()
   }
 })
+
+router.afterEach(to => { document.title = `${to.meta.title || '工作台'} · Albireo` })
 
 export default router

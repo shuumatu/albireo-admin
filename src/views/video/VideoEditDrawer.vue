@@ -1,7 +1,7 @@
 <template>
   <n-drawer
     :show="show"
-    :width="540"
+    width="min(540px, 100vw)"
     placement="right"
     :mask-closable="true"
     :close-on-esc="true"
@@ -62,10 +62,10 @@
 
       <template #footer>
         <n-flex justify="space-between" align="center" style="width: 100%;">
-          <span class="save-status">
+          <span class="save-status" role="status" aria-live="polite">
             <span v-if="saveStatus === 'saving'">保存中…</span>
             <span v-else-if="saveStatus === 'saved'">已保存于 {{ savedAtText }}</span>
-            <span v-else-if="saveStatus === 'error'" style="color: var(--n-error-color);">保存失败：{{ saveError }}</span>
+            <span v-else-if="saveStatus === 'error'" style="color: var(--n-error-color);">保存失败：{{ saveError }} <n-button text size="tiny" type="error" @click="saveField({ ...form })">重试</n-button></span>
           </span>
           <n-flex :size="6">
             <n-button size="small" @click="$emit('open-public')">在新窗口播放</n-button>
@@ -159,8 +159,9 @@
               :value="selectedCollectionIds"
               multiple
               filterable
-              tag
               clearable
+              :loading="collectionsSaving"
+              :disabled="collectionsSaving"
               :options="collectionOptions"
               placeholder="选择合集"
               @update:value="onCollectionsChange"
@@ -174,38 +175,45 @@
               filterable
               tag
               clearable
+              :loading="tagsLoading || tagsSaving"
+              :disabled="tagsLoading || tagsSaving || !!tagsError"
               :options="tagOptions"
               placeholder="选择或新建标签（回车）"
               @update:value="onTagsChange"
               :on-create="onTagCreate"
             />
+            <p v-if="tagsError" class="hint" role="alert">{{ tagsError }} <n-button text size="small" type="primary" @click="loadTags">重新加载</n-button></p>
           </div>
         </div>
 
         <!-- 位置 / 封面帧 用 tabs 折叠避免抽屉太长 -->
-        <n-tabs type="line" size="small" :default-value="'location'">
+        <div ref="tabsAnchor">
+        <n-tabs v-model:value="activeTab" type="line" size="small">
           <n-tab-pane name="location" tab="位置">
+            <p v-if="locationLoading" class="hint" role="status">正在加载位置…</p>
+            <p v-else-if="locationError" class="hint" role="alert">{{ locationError }} <n-button text size="small" type="primary" @click="loadLocation">重新加载</n-button></p>
             <LocationPicker
-              v-if="show"
+              v-if="show && !locationLoading && !locationError"
               v-model="locationModel"
               height="420px"
             />
             <n-flex justify="flex-end" style="margin-top: 8px;">
-              <n-button size="small" @click="onLocationSave">保存位置</n-button>
+              <n-button size="small" :loading="locationSaving" :disabled="locationLoading || !!locationError || !locationModel" @click="onLocationSave">保存位置</n-button>
             </n-flex>
           </n-tab-pane>
-          <n-tab-pane name="cover" tab="封面帧">
-            <p class="hint">点击下方按钮加载视频（默认 720P，转码未完成时会降级到原画），拖动进度条选取一帧作为封面。</p>
+          <n-tab-pane name="cover" tab="视频截帧">
+            <p class="hint">加载视频后拖动进度条截取画面，可将截图保存到本地。视频封面由处理流程自动生成。</p>
             <n-button
               v-if="!showFramePicker"
               size="small"
               :disabled="!hasStream"
               @click="showFramePicker = true"
             >
-              {{ hasStream ? '加载视频选封面' : '视频地址未就绪' }}
+              {{ hasStream ? '加载视频并截帧' : '视频地址未就绪' }}
             </n-button>
             <!-- key 取候选数组的字符串拼接，候选列表变化（例如换了视频）就强制 picker 重建 -->
             <VideoFramePicker
+              confirm-label="保存截图"
               v-else-if="hasStream"
               :key="streamCandidates.join('|')"
               :sources="streamCandidates"
@@ -213,13 +221,14 @@
             />
           </n-tab-pane>
         </n-tabs>
+        </div>
       </div>
     </n-drawer-content>
   </n-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import {
   NDrawer,
   NDrawerContent,
@@ -253,6 +262,8 @@ const props = defineProps<{
   show: boolean
   video: VideoItem | null
   collections: { id: number; name: string }[]
+  collectionsSaving?: boolean
+  initialTab?: 'location' | 'cover'
   /** 抽屉允许翻页时由父组件计算 */
   hasPrev: boolean
   hasNext: boolean
@@ -272,13 +283,13 @@ const emit = defineEmits<{
 const message = useMessage()
 
 interface LocalForm {
-  title: string | null
-  description: string | null
+  title: string
+  description: string
   visibility: string | null
   shotAt: string | null
 }
-const form = ref<LocalForm>({ title: null, description: null, visibility: null, shotAt: null })
-const initialForm = ref<LocalForm>({ title: null, description: null, visibility: null, shotAt: null })
+const form = ref<LocalForm>({ title: '', description: '', visibility: null, shotAt: null })
+const initialForm = ref<LocalForm>({ title: '', description: '', visibility: null, shotAt: null })
 
 const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 const saveError = ref('')
@@ -288,11 +299,31 @@ const savedAtText = computed(() =>
 )
 
 const showFramePicker = ref(false)
+const activeTab = ref<'location' | 'cover'>('location')
+const tabsAnchor = ref<HTMLElement | null>(null)
+let drawerGeneration = 0
+let disposed = false
+function isCurrent(id: number, generation: number) {
+  return !disposed && props.show && props.video?.id === id && drawerGeneration === generation
+}
+async function resetTab() {
+  activeTab.value = props.initialTab ?? 'location'
+  if (activeTab.value === 'cover' && props.show) {
+    const generation = drawerGeneration
+    await nextTick()
+    if (generation === drawerGeneration && props.show) tabsAnchor.value?.scrollIntoView({ block: 'start', behavior: 'auto' })
+  }
+}
+watch(() => props.initialTab, resetTab)
 
 // 标签 / 合集状态：抽屉打开时拉，关闭时清
 const selectedTagNames = ref<string[]>([])
 const initialTagsRef = ref<{ id: number; name: string }[]>([])
 const allTags = ref<{ id: number; name: string }[]>([])
+const tagsLoading = ref(false)
+const tagsError = ref('')
+const tagSaveIds = ref(new Set<number>())
+const tagsSaving = computed(() => props.video != null && tagSaveIds.value.has(props.video.id))
 const tagOptions = computed(() => allTags.value.map((t) => ({ label: t.name, value: t.name })))
 
 const selectedCollectionIds = ref<number[]>([])
@@ -302,6 +333,14 @@ const collectionOptions = computed(() =>
 
 // 位置（懒加载）
 const locationModel = ref<{ lat: number; lng: number } | null>(null)
+const locationLoading = ref(false)
+const locationError = ref('')
+const locationSaveIds = ref(new Set<number>())
+const locationSaving = computed(() => props.video != null && locationSaveIds.value.has(props.video.id))
+
+watch(() => [props.video?.collections, props.collectionsSaving] as const, () => {
+  if (!props.collectionsSaving) selectedCollectionIds.value = (props.video?.collections ?? []).map(c => c.id)
+}, { deep: true })
 
 // 只使用后端登记并授权的播放地址。
 const streamCandidates = computed(() => [
@@ -324,14 +363,42 @@ const shotAtMs = computed<number | null>(() => {
   const t = Date.parse(form.value.shotAt)
   return Number.isFinite(t) ? t : null
 })
+let titleTimer: number | null = null
+let descTimer: number | null = null
+let saveQueue: Promise<void> = Promise.resolve()
+const fieldSaveStates = new Map<number, { pending: number; errors: Map<string, string>; savedAt: Date | null; queued: Partial<LocalForm> }>()
+function fieldNeedsSave(field: keyof LocalForm, id = props.video?.id) {
+  const state = id == null ? undefined : fieldSaveStates.get(id)
+  const baseline = state?.pending && Object.prototype.hasOwnProperty.call(state.queued, field)
+    ? state.queued[field] : initialForm.value[field]
+  return form.value[field] !== baseline
+}
 
 /**
  * 当 video 切换或抽屉打开时，重置表单 + 重新拉关联数据。
  * 用 video.id 触发，避免父对象引用变化导致重复加载。
  */
 watch(
-  () => [props.show, props.video?.id] as const,
-  async ([show, _id]) => {
+  [() => props.show, () => props.video?.id],
+  ([show, _id], previous) => {
+    if (previous?.[0] && previous[1] != null) {
+      const patch: Partial<LocalForm> = {}
+      if (fieldNeedsSave('title', previous[1])) patch.title = form.value.title
+      if (fieldNeedsSave('description', previous[1])) patch.description = form.value.description
+      if (Object.keys(patch).length) void saveField(patch, previous[1])
+    }
+    if (titleTimer) window.clearTimeout(titleTimer)
+    if (descTimer) window.clearTimeout(descTimer)
+    titleTimer = descTimer = null
+    drawerGeneration++
+    selectedTagNames.value = []
+    initialTagsRef.value = []
+    allTags.value = []
+    tagsLoading.value = false
+    tagsError.value = ''
+    locationModel.value = null
+    locationLoading.value = false
+    locationError.value = ''
     if (!show || !props.video) return
     const v = props.video
     form.value = {
@@ -341,29 +408,55 @@ watch(
       shotAt: v.shotAt ?? null,
     }
     initialForm.value = { ...form.value }
+    form.value = { ...form.value, ...fieldSaveStates.get(v.id)?.queued }
     saveStatus.value = 'idle'
+    refreshSaveStatus(v.id)
     showFramePicker.value = false
+    void resetTab()
 
     selectedCollectionIds.value = (v.collections ?? []).map((c) => c.id)
 
-    try {
-      const [tagsForVideo, allTagList, loc] = await Promise.all([
-        fetchTagsWithVideoId(v.id),
-        fetchTags({ pageSize: 200 }),
-        fetchVideoLocation(v.uuid),
-      ])
-      initialTagsRef.value = tagsForVideo as any
-      selectedTagNames.value = (tagsForVideo as any[]).map((t) => t.name)
-      allTags.value = (allTagList as any) ?? []
-      locationModel.value = loc ? { lat: loc.latitude, lng: loc.longitude } : null
-    } catch (err) {
-      console.warn('加载视频关联数据失败', err)
-    }
+    void loadTags()
+    void loadLocation()
   },
-  { immediate: false }
+  { immediate: true }
 )
 
-let titleTimer: number | null = null
+async function loadTags() {
+  if (!props.video || tagsLoading.value || tagsSaving.value) return
+  const id = props.video.id
+  const generation = drawerGeneration
+  tagsLoading.value = true
+  tagsError.value = ''
+  try {
+    const [tags, options] = await Promise.all([fetchTagsWithVideoId(id), fetchTags({ pageSize: 200 })])
+    if (!isCurrent(id, generation)) return
+    initialTagsRef.value = tags ?? []
+    selectedTagNames.value = initialTagsRef.value.map(t => t.name)
+    allTags.value = [...new Map([...(options ?? []), ...initialTagsRef.value].map(tag => [tag.name, tag])).values()]
+  } catch (err: any) {
+    if (isCurrent(id, generation)) tagsError.value = `标签加载失败：${err?.message ?? '请重试'}`
+  } finally {
+    if (isCurrent(id, generation)) tagsLoading.value = false
+  }
+}
+
+async function loadLocation() {
+  if (!props.video || locationLoading.value || locationSaving.value) return
+  const { id, uuid } = props.video
+  const generation = drawerGeneration
+  locationLoading.value = true
+  locationError.value = ''
+  try {
+    const loc = await fetchVideoLocation(uuid)
+    if (isCurrent(id, generation)) locationModel.value = loc ? { lat: loc.latitude, lng: loc.longitude } : null
+  } catch (err: any) {
+    if (isCurrent(id, generation)) locationError.value = `位置加载失败：${err?.message ?? '请重试'}`
+  } finally {
+    if (isCurrent(id, generation)) locationLoading.value = false
+  }
+}
+
 function onTitleInput(v: string) {
   form.value.title = v
   if (titleTimer) window.clearTimeout(titleTimer)
@@ -374,11 +467,10 @@ function flushTitle() {
     window.clearTimeout(titleTimer)
     titleTimer = null
   }
-  if (form.value.title === initialForm.value.title) return
+  if (!fieldNeedsSave('title')) return
   saveField({ title: form.value.title })
 }
 
-let descTimer: number | null = null
 function onDescriptionUpdate(v: string) {
   form.value.description = v
   if (descTimer) window.clearTimeout(descTimer)
@@ -389,13 +481,13 @@ function flushDescription() {
     window.clearTimeout(descTimer)
     descTimer = null
   }
-  if (form.value.description === initialForm.value.description) return
+  if (!fieldNeedsSave('description')) return
   saveField({ description: form.value.description })
 }
 
 function onVisibilityChange(v: string) {
   form.value.visibility = v
-  if (v === initialForm.value.visibility) return
+  if (!fieldNeedsSave('visibility')) return
   saveField({ visibility: v })
 }
 
@@ -405,78 +497,107 @@ function onShotAtChange(ms: number | null) {
 }
 
 /**
- * 字段级 patch：只发送当前字段，UI 立即标记已保存。
- * 失败时回滚 initialForm 与表单数据，让用户清楚知道"没保存上"。
+ * 顺序提交字段快照，全部请求完成后再显示保存结果；失败字段保留以便重试。
  */
-async function saveField(patch: Partial<LocalForm>) {
-  if (!props.video) return
-  const id = props.video.id
-  saveStatus.value = 'saving'
-  saveError.value = ''
-  try {
-    await updateVideo(id, {
-      title: patch.title ?? form.value.title ?? '',
-      description: patch.description ?? form.value.description ?? '',
-      shotAt: patch.shotAt ?? form.value.shotAt ?? null,
-      visibility: patch.visibility ?? form.value.visibility ?? null,
-    })
-    initialForm.value = { ...form.value }
-    saveStatus.value = 'saved'
-    savedAt.value = new Date()
-    emit('patched', id, {
-      title: form.value.title,
-      description: form.value.description,
-      visibility: form.value.visibility,
-      shotAt: form.value.shotAt,
-    })
-  } catch (err: any) {
-    saveStatus.value = 'error'
-    saveError.value = err?.message ?? '未知错误'
-  }
+function refreshSaveStatus(id: number) {
+  if (disposed || !props.show || props.video?.id !== id) return
+  const state = fieldSaveStates.get(id)
+  if (!state) return
+  saveStatus.value = state.pending ? 'saving' : state.errors.size ? 'error' : 'saved'
+  saveError.value = [...state.errors.values()][0] ?? ''
+  savedAt.value = state.savedAt
+}
+async function saveField(patch: Partial<LocalForm>, id = props.video?.id) {
+  if (id == null) return
+  const snapshot = { ...patch }
+  const state = fieldSaveStates.get(id) ?? { pending: 0, errors: new Map<string, string>(), savedAt: null, queued: {} }
+  fieldSaveStates.set(id, state)
+  state.queued = { ...state.queued, ...snapshot }
+  state.pending++
+  refreshSaveStatus(id)
+  saveQueue = saveQueue.then(async () => {
+    try {
+      await updateVideo(id, snapshot)
+      emit('patched', id, snapshot)
+      for (const field of Object.keys(snapshot)) state.errors.delete(field)
+      state.savedAt = new Date()
+      if (disposed || props.video?.id !== id || !props.show) return
+      initialForm.value = { ...initialForm.value, ...snapshot }
+    } catch (err: any) {
+      for (const field of Object.keys(snapshot)) state.errors.set(field, err?.message ?? '未知错误')
+      if (!disposed && (props.video?.id !== id || !props.show)) {
+        message.error(`保存失败：${err?.message ?? '未知错误'}`)
+      }
+    } finally {
+      state.pending--
+      if (!state.pending) {
+        state.queued = Object.fromEntries(Object.entries(state.queued).filter(([field]) => state.errors.has(field)))
+      }
+      refreshSaveStatus(id)
+    }
+  })
+  await saveQueue
 }
 
+onBeforeUnmount(() => {
+  flushTitle()
+  flushDescription()
+  disposed = true
+  drawerGeneration++
+})
+
 async function onCollectionsChange(ids: number[]) {
-  if (!props.video) return
-  selectedCollectionIds.value = ids
-  emit('collections-changed', props.video.id, ids)
+  if (!props.video || props.collectionsSaving) return
+  selectedCollectionIds.value = [...ids]
+  emit('collections-changed', props.video.id, [...ids])
 }
 
 async function onTagsChange(names: string[]) {
-  if (!props.video) return
+  if (!props.video || tagsLoading.value || tagsSaving.value || tagsError.value) return
+  const videoId = props.video.id
+  const generation = drawerGeneration
+  const options = [...allTags.value]
   const before = new Set(initialTagsRef.value.map((t) => t.name))
   const after = new Set(names)
   // 计算 add / remove
   const toAddNames = names.filter((n) => !before.has(n))
   const toRemoveTags = initialTagsRef.value.filter((t) => !after.has(t.name))
 
-  selectedTagNames.value = names
+  selectedTagNames.value = [...names]
+  tagSaveIds.value.add(videoId)
   try {
     // 新名字若不在 allTags 里，先创建拿 id
     const idsToAdd: number[] = []
     for (const n of toAddNames) {
-      const exist = allTags.value.find((t) => t.name === n)
+      const exist = options.find((t) => t.name === n)
       if (exist) {
         idsToAdd.push(exist.id)
       } else {
         const created: any = await createTag({ name: n })
         if (created?.id) {
           idsToAdd.push(created.id)
-          allTags.value.push({ id: created.id, name: created.name ?? n })
+          options.push({ id: created.id, name: created.name ?? n })
+        } else {
+          throw new Error('新建标签未返回有效 ID')
         }
       }
     }
     if (idsToAdd.length > 0) {
-      await addTagsToVideo({ tagIds: idsToAdd, videoId: props.video.id })
+      await addTagsToVideo({ tagIds: idsToAdd, videoId })
     }
     if (toRemoveTags.length > 0) {
-      await removeTagsFromVideo({ tagIds: toRemoveTags.map((t) => t.id), videoId: props.video.id })
+      await removeTagsFromVideo({ tagIds: toRemoveTags.map((t) => t.id), videoId })
     }
     // 更新 initial 引用
-    initialTagsRef.value = names.map((n) => {
-      return allTags.value.find((t) => t.name === n) ?? { id: -1, name: n }
-    })
+    if (isCurrent(videoId, generation)) {
+      allTags.value = options
+      initialTagsRef.value = names.map(n => options.find(t => t.name === n)!)
+    }
   } catch (err: any) {
-    message.error(`标签更新失败：${err?.message ?? '未知错误'}`)
+    if (!disposed) message.error(`视频标签更新失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    tagSaveIds.value.delete(videoId)
+    if (!disposed && props.show && props.video?.id === videoId) void loadTags()
   }
 }
 
@@ -488,33 +609,30 @@ function onTagCreate(label: string) {
   return { label, value: label }
 }
 
-/**
- * 用户在 VideoFramePicker 里点了"使用此帧"。
- *
- * 当前不直接走"上传新封面"的端到端：
- *  - 后端目前的封面机制是 worker 在转码时主动选第一帧 + 上传 R2 + 写 video_images 关系；
- *  - 用户手动改封面需要新接口（dataURL → R2 → 更新 video_images.usage='cover'），
- *    属于另一个 PR 的范畴。
- *
- * 在那之前，先把抓到的帧本地预览出来给用户确认，避免功能"完全感觉不到"。
- * 后续接入正式接口时直接在这里替换为 API 调用即可，UI 不用动。
- */
-async function onFrameCaptured(dataUrl: string, atSec: number) {
-  message.info(`已抓取到第 ${atSec.toFixed(1)}s 的帧（暂未接入封面替换接口）`)
-  // 占位：未来调 uploadCustomCover(videoId, dataUrl) 之类
-  void dataUrl
+function onFrameCaptured(dataUrl: string, atSec: number) {
+  const link = document.createElement('a')
+  link.href = dataUrl
+  link.download = `video-${props.video?.id ?? 'frame'}-${atSec.toFixed(2)}s.jpg`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  message.success('截图已准备下载')
 }
 
 async function onLocationSave() {
-  if (!props.video || !locationModel.value) return
+  if (!props.video || !locationModel.value || locationLoading.value || locationSaving.value || locationError.value) return
+  const { id, uuid } = props.video
+  const generation = drawerGeneration
+  const payload = { longitude: locationModel.value.lng, latitude: locationModel.value.lat }
+  locationSaveIds.value.add(id)
   try {
-    await updateVideoLocation(props.video.uuid, {
-      longitude: locationModel.value.lng,
-      latitude: locationModel.value.lat,
-    })
-    message.success('位置已保存')
+    await updateVideoLocation(uuid, payload)
+    if (isCurrent(id, generation)) message.success('位置已保存')
   } catch (err: any) {
-    message.error(`位置保存失败：${err?.message ?? '未知错误'}`)
+    if (!disposed) message.error(`位置保存失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    locationSaveIds.value.delete(id)
+    if (!disposed && props.show && props.video?.id === id && generation !== drawerGeneration) void loadLocation()
   }
 }
 </script>

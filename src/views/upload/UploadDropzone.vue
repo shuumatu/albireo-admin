@@ -19,6 +19,8 @@
       multiple
       :accept="accept"
       class="upload-dropzone__input"
+      @click.stop
+      tabindex="-1"
       @change="onInputChange"
     />
     <div class="upload-dropzone__icon-wrapper">
@@ -30,7 +32,7 @@
       点击或拖拽文件到此处上传
     </div>
     <div class="upload-dropzone__hint">
-      支持批量、断点续传与秒传 · 单文件 ≤ 5GB
+      支持批量、断点续传与秒传 · 建议单文件不超过 5GB
     </div>
   </div>
 
@@ -154,13 +156,14 @@ function onWindowDrop(e: DragEvent) {
     clearMask()
     return
   }
-  // 兜底：避免浏览器把文件当导航处理
+  // 在 preventDefault 之前记录子元素是否已经消费该事件。
+  const handled = e.defaultPrevented
   e.preventDefault()
   clearMask()
   // dropzone 元素自身的 @drop 已经处理过这批文件（并 stopPropagation），
   // 这里通过 defaultPrevented 判断避免同一批 files 被 emit 两次，
   // 导致第二次进入 enqueueFiles 时全部命中弱去重并误报「跳过 N 个重复文件」。
-  if (e.defaultPrevented) return
+  if (handled) return
   // 全屏遮罩承诺"任何位置 drop 都生效"，所以 window 级 drop 也接受文件
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length) emit('files', files)
@@ -204,9 +207,10 @@ defineExpose({ openPicker })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 36px 16px;
+  padding: 44px 20px;
+  text-align: center;
   border: 2px dashed var(--n-border-color);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--n-color-modal, rgba(127, 127, 127, 0.04));
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, transform 0.2s;
@@ -215,12 +219,12 @@ defineExpose({ openPicker })
 }
 .upload-dropzone:hover,
 .upload-dropzone:focus-visible {
-  border-color: var(--n-color-target, #2080f0);
-  background: var(--n-color-pressed, rgba(32, 128, 240, 0.06));
+  border-color: var(--n-primary-color, var(--admin-accent, #2f7b5b));
+  background: rgba(47, 123, 91, 0.06);
 }
 .upload-dropzone--active {
-  border-color: var(--n-color-target, #2080f0);
-  background: var(--n-color-pressed, rgba(32, 128, 240, 0.1));
+  border-color: var(--n-primary-color, var(--admin-accent, #2f7b5b));
+  background: rgba(47, 123, 91, 0.1);
   transform: scale(1.005);
 }
 .upload-dropzone__input {
@@ -240,7 +244,7 @@ defineExpose({ openPicker })
 .upload-dropzone--active .upload-dropzone__icon,
 .upload-dropzone:hover .upload-dropzone__icon,
 .upload-dropzone:focus-visible .upload-dropzone__icon {
-  color: var(--n-color-target, #2080f0);
+  color: var(--n-primary-color, var(--admin-accent, #2f7b5b));
 }
 .upload-dropzone__primary {
   font-size: 16px;
@@ -290,4 +294,7 @@ defineExpose({ openPicker })
     padding: 24px 12px;
   }
 }
+
+.upload-dropzone:focus-visible { outline: 3px solid var(--admin-focus, #91cba3); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .upload-dropzone, .upload-dropzone-mask-enter-active, .upload-dropzone-mask-leave-active { transition: none; } }
 </style>

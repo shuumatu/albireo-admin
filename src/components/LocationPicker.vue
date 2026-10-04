@@ -8,6 +8,7 @@
           placeholder="例如 23.1291"
           type="text"
           inputmode="decimal"
+          :input-props="{ 'aria-label': '纬度' }"
           style="width: 140px;"
           @blur="applyCoordInput"
         />
@@ -17,6 +18,7 @@
           placeholder="例如 113.2644"
           type="text"
           inputmode="decimal"
+          :input-props="{ 'aria-label': '经度' }"
           style="width: 140px;"
           @blur="applyCoordInput"
         />
@@ -378,7 +380,11 @@ function clearLocation() {
 .coord-inputs {
   display: flex;
   align-items: center;
+  width: 100%;
+  min-width: 0;
 }
+.coord-inputs :deep(.n-input) { flex: 1 1 0; min-width: 0; }
+.coord-inputs :deep(.n-input-group-label) { flex: 0 0 48px; }
 
 .location-picker-map {
   width: 100%;

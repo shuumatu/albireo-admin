@@ -22,7 +22,7 @@
         type="error"
         @click.stop="$emit('retry')"
       >
-        重试
+        {{ status === 'failed' ? '重新上传' : '重试' }}
       </n-button>
     </n-flex>
   </div>
@@ -125,11 +125,11 @@ const canRetry = computed(() =>
 }
 
 /* 不同状态用不同色调，让"在哪一步"一眼可辨；具体渐变在 .status-overlay 上做。 */
-.status-uploading      { --overlay-tone: #1668dc; }
+.status-uploading      { --overlay-tone: #397d65; }
 .status-pending        { --overlay-tone: #595959; }
 .status-processing     { --overlay-tone: #d46b08; }
-.status-transcoding    { --overlay-tone: #722ed1; }
-.status-ai_analyzing   { --overlay-tone: #1d7eb8; }
+.status-transcoding    { --overlay-tone: #657b4b; }
+.status-ai_analyzing   { --overlay-tone: #357b70; }
 .status-failed         { --overlay-tone: #cf1322; }
 .status-ai_analyze_failed { --overlay-tone: #cf1322; }
 .status-transcode_failed  { --overlay-tone: #cf1322; }

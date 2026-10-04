@@ -1,6 +1,6 @@
 <template>
-  <div class="config-page">
-    <header class="page-header">
+  <div class="config-page admin-page">
+    <header class="page-header admin-page-header">
       <div>
         <div class="eyebrow">ADMINISTRATION / RUNTIME</div>
         <div class="title-row">
@@ -45,14 +45,14 @@
         </div>
         <span class="result-summary">显示 {{ filteredRows.length }} / {{ configDefinitions.length }} 项</span>
       </div>
-      <n-data-table class="config-table" :columns="columns" :data="filteredRows" :loading="loading" :pagination="false" :bordered="false" :single-line="false" size="small" :row-key="(row: ConfigRow) => row.category + '-' + row.key">
+      <n-data-table class="config-table" :scroll-x="1120" :columns="columns" :data="filteredRows" :loading="loading" :pagination="false" :bordered="false" :single-line="false" size="small" :row-key="(row: ConfigRow) => row.category + '-' + row.key">
         <template #empty><n-empty description="没有匹配的预定义配置" /></template>
       </n-data-table>
     </n-card>
 
-    <n-modal v-model:show="showModal" preset="card" :title="editingDefinition?.label ?? '填写配置'" class="config-modal">
+    <n-modal v-model:show="showModal" preset="card" :mask-closable="false" :closable="!saving" :close-on-esc="!saving" :title="editingDefinition?.label ?? '填写配置'" class="config-modal" @after-leave="clearSecret">
       <n-alert v-if="editingDefinition" type="info" :show-icon="false" class="edit-tip">{{ editingDefinition.description }}</n-alert>
-      <n-form :model="form" label-placement="top">
+      <n-form :model="form" :disabled="saving" label-placement="top" @submit.prevent="handleSubmit">
         <div class="readonly-meta">
           <div><span class="meta-label">配置键名</span><code>{{ editingDefinition?.category }}.{{ editingDefinition?.key }}</code></div>
           <n-tag size="small" :type="editingDefinition?.encrypted ? 'warning' : 'default'" :bordered="false" round>{{ editingDefinition?.encrypted ? '加密存储' : editingDefinition?.valueType }}</n-tag>
@@ -71,7 +71,7 @@
       <template #footer>
         <div class="modal-footer">
           <span class="modal-footer-hint"><n-icon :component="LockClosedOutline" />敏感值只会在当前会话中临时显示</span>
-          <n-space><n-button @click="showModal = false">取消</n-button><n-button type="primary" :loading="saving" @click="handleSubmit">保存配置</n-button></n-space>
+          <n-space><n-button :disabled="saving" @click="showModal = false">取消</n-button><n-button type="primary" :loading="saving" :disabled="!hasChanges" @click="handleSubmit">保存配置</n-button></n-space>
         </div>
       </template>
     </n-modal>
@@ -115,6 +115,8 @@ const secretVisible = ref(false)
 const editingDefinition = ref<ConfigDefinition | null>(null)
 const editingRow = ref<ConfigRow | null>(null)
 const form = reactive({ value: '' })
+const hasChanges = computed(() => !!editingRow.value && (editingRow.value.encrypted ? !!form.value.trim() : form.value.trim() !== editingRow.value.value))
+function clearSecret() { form.value = ''; secretVisible.value = false; editingRow.value = null; editingDefinition.value = null }
 const categoryOptions = [{ label: '全部配置', value: 'all' }, { label: '对象存储', value: 'storage' }, { label: '视觉 AI', value: 'vision-ai' }]
 const hasFilters = computed(() => selectedCategory.value !== 'all' || pendingOnly.value || !!searchKeyword.value.trim())
 const rows = computed<ConfigRow[]>(() => configDefinitions.map(definition => {
@@ -142,15 +144,17 @@ const columns: DataTableColumns<ConfigRow> = [
   { title: '操作', key: 'actions', width: 110, render: row => h(NButton, { text: true, type: 'primary', size: 'small', onClick: () => handleEdit(row) }, { icon: () => h(NIcon, { component: CreateOutline }), default: () => row.configured ? '编辑' : '填写' }) },
 ]
 async function loadConfigs() {
+  if (loading.value) return
   loading.value = true
   loadError.value = ''
   try { const result = await fetchManagedConfigs(); configs.value = Array.isArray(result) ? result : []; lastUpdatedAt.value = Date.now() }
-  catch (err) { console.error('加载配置失败:', err); loadError.value = '获取配置失败，请检查服务连接后重试。'; configs.value = [] }
+  catch (err) { console.error('加载配置失败:', err); loadError.value = '获取配置失败，请检查服务连接后重试。已保留上次读取的配置。' }
   finally { loading.value = false }
 }
 function resetFilters() { selectedCategory.value = 'all'; searchKeyword.value = ''; pendingOnly.value = false }
 function handleEdit(row: ConfigRow) { editingDefinition.value = row; editingRow.value = row; form.value = row.encrypted ? '' : row.value ?? ''; secretVisible.value = false; showModal.value = true }
 async function handleSubmit() {
+  if (saving.value || !hasChanges.value) return
   if (!editingDefinition.value || !editingRow.value) return
   const value = form.value.trim()
   if (editingDefinition.value.encrypted && editingRow.value.configured && !value) { showModal.value = false; message.info('密钥未修改'); return }
@@ -185,7 +189,7 @@ onMounted(loadConfigs)
 .page-description { color: var(--n-text-color-2); margin: 8px 0 0; font-size: 13px; } .last-updated { color: var(--n-text-color-3); font-size: 12px; }
 .scope-alert { margin-bottom: 20px; } .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
 .stat-item { display: flex; align-items: center; gap: 13px; padding: 17px 18px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 8px; }
-.stat-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; font-size: 18px; } .stat-icon-blue { color: #2563eb; background: #eff6ff; } .stat-icon-purple { color: #7c3aed; background: #f5f3ff; } .stat-icon-orange { color: #d97706; background: #fffbeb; } .stat-icon-green { color: #059669; background: #ecfdf5; }
+.stat-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; font-size: 18px; } .stat-icon-blue { color: var(--admin-accent, #2f7b5b); background: var(--admin-accent-soft, #e6f3e9); } .stat-icon-purple { color: #5b785a; background: #edf3e9; } .stat-icon-orange { color: #d97706; background: #fffbeb; } .stat-icon-green { color: #059669; background: #ecfdf5; }
 .stat-label { display: block; color: var(--n-text-color-3); font-size: 12px; margin-bottom: 2px; } .stat-item strong { font-size: 22px; line-height: 1; }
 .config-panel { overflow: hidden; } .filter-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--n-divider-color); }
 .filter-group { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; } .category-filter { width: 170px; } .keyword-filter { width: 280px; } .result-summary { color: var(--n-text-color-3); font-size: 12px; white-space: nowrap; }

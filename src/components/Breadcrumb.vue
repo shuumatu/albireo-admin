@@ -1,97 +1,17 @@
 <template>
-  <n-breadcrumb class="cool-breadcrumb" style="margin-left: 13px;"
-  >
-    <n-breadcrumb-item
-      v-for="(item, index) in breadcrumbRoutes"
-      :key="item.path"
-      :clickable="index !== breadcrumbRoutes.length - 1"
-      @click="goTo(item, index)"
-      style="cursor: pointer;"
-    >
-    <template #separator>
-        <n-flex>
-            <img
-                src="../assets/ChevronRight16Regular.svg"
-                alt=">"
-                style="width: 20px; height: 20px; opacity: 0.6;"
-            />
-        </n-flex>
-    </template>
-        {{ item.meta.title }}
-    </n-breadcrumb-item>
-  </n-breadcrumb>
+  <nav class="breadcrumb" aria-label="面包屑导航">
+    <router-link to="/" class="home-crumb"><n-icon :component="GridOutline" :size="15" /><span>工作空间</span></router-link>
+    <template v-if="route.path !== '/'"><n-icon :component="ChevronForwardOutline" :size="12" class="separator" /><template v-if="parent"><router-link :to="parent.path">{{ parent.meta.title }}</router-link><n-icon :component="ChevronForwardOutline" :size="12" class="separator" /></template><span class="current" aria-current="page">{{ route.meta.title || '工作台' }}</span></template>
+  </nav>
 </template>
-
 <script setup lang="ts">
-import { useRouter, useRoute } from 'vue-router'
 import { computed } from 'vue'
-
-const router = useRouter()
-const route = useRoute()
-
-// 生成面包屑数据，支持平级路由用 meta.parent 找父级
-const breadcrumbRoutes = computed(() => {
-  const crumbs = []
-  let currentRoute = route
-
-  while (currentRoute) {
-    crumbs.unshift(currentRoute) // 头部插入
-
-    // 如果 meta.parent 存在，找父级路由
-    if (currentRoute.meta.parent) {
-      const parentRoute = router
-        .getRoutes()
-        .find(r => r.name === currentRoute.meta.parent)
-      if (parentRoute) {
-        currentRoute = {
-          path: parentRoute.path,
-          meta: parentRoute.meta
-        } as any
-        continue
-      }
-    }
-    break
-  }
-
-  return crumbs
-})
-
-function goTo(routeItem: any, index: number) {
-  if (index < breadcrumbRoutes.value.length - 1) {
-    router.push(routeItem.path)
-  }
-}
+import { useRoute, useRouter } from 'vue-router'
+import { GridOutline, ChevronForwardOutline } from '@vicons/ionicons5'
+const route = useRoute(), router = useRouter()
+const parent = computed(() => route.meta.parent ? router.getRoutes().find(item => item.name === route.meta.parent) : undefined)
 </script>
-
 <style scoped>
-.cool-breadcrumb :deep(.n-breadcrumb-item__link) {
-  font-family: 'FOT-TelopMinProN-E';
-  font-weight: 600;
-  font-size: 18px;
-  background: linear-gradient(90deg, rgba(0, 255, 0, 0.8), rgba(0,150,0,0.8));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  transition: all 0.3s;
-  position: relative;
-}
-
-/* hover 发光效果 */
-.cool-breadcrumb :deep(.n-breadcrumb-item__link:hover) {
-  text-shadow: 0 0 6px rgba(79, 172, 254, 0.6);
-}
-
-/* hover 下划线动画 */
-.cool-breadcrumb :deep(.n-breadcrumb-item__link)::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  bottom: -2px;
-  width: 0%;
-  height: 2px;
-  background: linear-gradient(90deg, #0088ff, #ffd500);
-  transition: width 0.3s ease;
-}
-.cool-breadcrumb :deep(.n-breadcrumb-item__link:hover)::after {
-  width: 100%;
-}
+.home-crumb :deep(.n-icon) { color: var(--admin-icon); }
+.breadcrumb { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--admin-muted); min-width: 0; white-space: nowrap; }.home-crumb { display: flex; gap: 8px; align-items: center; }.breadcrumb a:hover { color: var(--admin-accent); }.current { color: var(--admin-text); overflow: hidden; text-overflow: ellipsis; }.separator { color: #a8b9ac; flex-shrink: 0; }@media(max-width:640px) { .breadcrumb { gap: 7px; }.home-crumb span { display: none; } }
 </style>

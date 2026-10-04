@@ -1,247 +1,37 @@
 <template>
-  <n-layout-header class="header" bordered>
-    <!-- 左侧 logo -->
-    <div class="logo">
-      <router-link to="/">
-        <img
-          :src="albireoLogo"
-          alt="Logo"
-        />
-      </router-link>
+  <header class="app-header">
+    <n-button class="mobile-menu" quaternary circle aria-label="打开导航" @click="$emit('toggle-menu')"><template #icon><n-icon :component="MenuOutline" /></template></n-button>
+    <Breadcrumb />
+    <div class="header-actions">
+      <button class="search-trigger" aria-label="搜索页面，快捷键 Ctrl K" @click="$emit('open-search')"><n-icon :component="SearchOutline" :size="16" /><span>搜索页面</span><kbd>⌘ / Ctrl K</kbd></button>
+      <n-tooltip><template #trigger><n-button quaternary circle aria-label="查看处理进度" @click="router.push('/manager/task-progress')"><template #icon><n-icon :component="PulseOutline" /></template></n-button></template>处理进度</n-tooltip>
+      <span class="header-divider" />
+      <n-dropdown :options="userMenuOptions" trigger="click" @select="handleUserMenuSelect"><n-button quaternary class="user-btn"><span class="user-avatar">{{ (authStore.username || 'A').charAt(0).toUpperCase() }}</span><span class="username">{{ authStore.username || '管理员' }}</span><n-icon :component="ChevronDownOutline" :size="13" /></n-button></n-dropdown>
     </div>
-
-    <!-- 中间菜单 -->
-    <div class="menu-wrapper">
-      <n-menu
-        mode="horizontal"
-        :options="menuOptions"
-        :value="activeKey"
-        @update:value="handleMenuSelect"
-        class="menu"
-        
-      />
-    </div>
-
-    <!-- 右侧用户菜单 -->
-    <div class="user-area">
-      <n-dropdown :options="userMenuOptions" @select="handleUserMenuSelect">
-        <n-button quaternary class="user-btn">
-          <template #icon>
-            <n-icon :component="PersonIcon" />
-          </template>
-          {{ authStore.username }}
-        </n-button>
-      </n-dropdown>
-    </div>
-  </n-layout-header>
+  </header>
 </template>
-
 <script setup lang="ts">
-import albireoLogo from '../assets/albireo-logo.png'
-import { ref, watch, h } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { h } from 'vue'
+import { useRouter } from 'vue-router'
 import { NIcon, useDialog } from 'naive-ui'
-import { PersonCircleOutline as PersonIcon, SettingsOutline, LogOutOutline } from '@vicons/ionicons5'
+import { SettingsOutline, LogOutOutline, MenuOutline, SearchOutline, PulseOutline, ChevronDownOutline } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth'
-
-const route = useRoute()
-const router = useRouter()
-const dialog = useDialog()
-const authStore = useAuthStore()
-const activeKey = ref(route.path)
-
-watch(route, () => {
-  activeKey.value = route.path
-})
-
-const menuOptions = [
-  {
-    label: '上传',
-    key: '/upload'
-  },
-  {
-    label: '管理',
-    key: '/manager',
-    children:[
-      {
-        label: '视频管理',
-        key: '/manager/video'
-      },
-      {
-        label: '合集管理',
-        key: '/manager/collection'
-      },
-      {
-        label: '图片管理',
-        key: '/manager/image'
-      },
-      {
-        label: '标签管理',
-        key: '/manager/tag'
-      },
-      {
-        label: '评论管理',
-        key: '/manager/comment'
-      },
-      {
-        label: '分享管理',
-        key: '/manager/share'
-      },
-      {
-        label: '系统配置',
-        key: '/manager/system-config'
-      },
-    ]
-  },
-  {
-    label: '工具',
-    key: '/tools',
-    children: [
-      {
-        label: '处理进度',
-        key: '/manager/task-progress'
-      },
-      {
-        label: '模型切换',
-        key: '/manager/vision-model'
-      },
-      {
-        label: '向量嵌入',
-        key: '/manager/embedding'
-      },
-      {
-        label: '重新处理',
-        key: '/manager/reprocess'
-      }
-    ]
-  }
-]
-
-function renderIcon(icon: any) {
-  return () => h(NIcon, null, { default: () => h(icon) })
-}
-
+import Breadcrumb from './Breadcrumb.vue'
+defineEmits<{ 'toggle-menu': []; 'open-search': [] }>()
+const router = useRouter(), dialog = useDialog(), authStore = useAuthStore()
 const userMenuOptions = [
-  {
-    label: '个人设置',
-    key: 'profile',
-    icon: renderIcon(SettingsOutline)
-  },
-  {
-    type: 'divider',
-    key: 'd1'
-  },
-  {
-    label: '退出登录',
-    key: 'logout',
-    icon: renderIcon(LogOutOutline)
-  }
+  { label: '个人设置', key: 'profile', icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }) },
+  { type: 'divider', key: 'divider' },
+  { label: '退出登录', key: 'logout', icon: () => h(NIcon, null, { default: () => h(LogOutOutline) }) },
 ]
-
-function handleMenuSelect(key: string) {
-  router.push(key)
-}
-
 function handleUserMenuSelect(key: string) {
-  if (key === 'profile') {
-    router.push('/profile')
-  } else if (key === 'logout') {
-    dialog.warning({
-      title: '确认退出',
-      content: '确定要退出登录吗？',
-      positiveText: '退出',
-      negativeText: '取消',
-      onPositiveClick: () => {
-        authStore.logout()
-        router.push('/login')
-      }
-    })
-  }
+  if (key === 'profile') router.push('/profile')
+  else if (key === 'logout') dialog.warning({ title: '退出登录', content: '确定退出当前管理账户吗？', positiveText: '退出', negativeText: '取消', onPositiveClick: () => { authStore.logout(); router.push('/login') } })
 }
 </script>
-
 <style scoped>
-.header {
-  background-color: black;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 64px;
-  padding: 0 20px;
-}
-
-/* 左侧 logo */
-.logo img {
-  height: 40px;
-}
-
-/* 菜单容器 */
-.menu-wrapper {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-}
-
-/* 用户区域 */
-.user-area {
-  display: flex;
-  align-items: center;
-}
-
-.user-btn {
-  color: rgba(255, 255, 255, 0.85) !important;
-  font-size: 14px;
-}
-
-.user-btn:hover {
-  color: #fff !important;
-}
-
-/* 菜单样式 */
-.menu :deep(.n-menu-item),
-.menu :deep(.n-submenu) {
-  color: white;
-  position: relative;
-  padding: 0 20px;
-}
-
-/* 仅给内层 menu-item-content 上色，外层 padding 与竖线保持原样
-   submenu 在 dropdown 真正展开前不会有 --hover，所以补一条 .n-submenu:hover .n-menu-item-content 让它即时响应 */
-.menu :deep(.n-menu-item:hover .n-menu-item-content),
-.menu :deep(.n-submenu:hover .n-menu-item-content),
-.menu :deep(.n-menu-item-content:hover),
-.menu :deep(.n-menu-item-content--hover),
-.menu :deep(.n-menu-item-content--child-active),
-.menu :deep(.n-menu-item-content--selected) {
-  background-color: #ffffff5e !important;
-  color: white !important;
-}
-
-/* 同步 hover/激活下文字与下拉箭头颜色，避免 naive-ui 默认变成主题蓝 */
-.menu :deep(.n-menu-item:hover .n-menu-item-content-header),
-.menu :deep(.n-submenu:hover .n-menu-item-content-header),
-.menu :deep(.n-menu-item-content--hover .n-menu-item-content-header),
-.menu :deep(.n-menu-item-content--child-active .n-menu-item-content-header),
-.menu :deep(.n-menu-item-content--selected .n-menu-item-content-header),
-.menu :deep(.n-submenu:hover .n-menu-item-content__arrow),
-.menu :deep(.n-menu-item-content--hover .n-menu-item-content__arrow),
-.menu :deep(.n-menu-item-content--child-active .n-menu-item-content__arrow),
-.menu :deep(.n-menu-item-content--selected .n-menu-item-content__arrow) {
-  color: white !important;
-}
-
-/* 菜单项之间添加竖线 */
-.menu :deep(.n-menu-item:not(:last-child)::after),
-.menu :deep(.n-submenu:not(:last-child)::after) {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 20px;
-  width: 1px;
-  background-color: white;
-}
+.app-header :deep(.n-icon) { color: var(--admin-icon); }
+.app-header { height: 68px; flex-shrink: 0; padding: 0 32px; background: rgba(255,255,255,.95); border-bottom: 1px solid var(--admin-border); display: flex; align-items: center; gap: 14px; }.header-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }.search-trigger { height: 33px; display: flex; align-items: center; gap: 9px; padding: 0 10px; background: var(--admin-hover); border: 1px solid var(--admin-border); border-radius: 7px; color: var(--admin-muted); font-size: 12px; }.search-trigger kbd { font: inherit; font-size: 10px; color: #829887; margin-left: 30px; }.header-divider { height: 22px; width: 1px; background: var(--admin-border); }.user-btn :deep(.n-button__content) { gap: 9px; }.username { max-width: 100px; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }.user-avatar { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--admin-accent-soft); color: var(--admin-accent); font-size: 11px; }.mobile-menu { display: none; }
+@media(max-width:960px) { .mobile-menu { display: flex; }.app-header { padding: 0 16px; } }
+@media(max-width:640px) { .app-header { height: 58px; padding: 0 10px; gap: 6px; }.header-actions { gap: 3px; }.search-trigger { border: 0; background: transparent; }.search-trigger span, .search-trigger kbd, .username, .header-divider { display: none; } }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="detail-page">
+  <div class="detail-page admin-page">
 
     <!-- 返回 + 页面头 -->
     <div class="page-header">
@@ -8,7 +8,7 @@
         合集管理
       </n-button>
       <div class="header-title">
-        <h1 class="page-title">{{ collection.name || '加载中...' }}</h1>
+        <h1 class="page-title">{{ collection.name || (detailLoading ? '正在加载合集…' : '合集详情') }}</h1>
         <n-tag size="small" :bordered="false" type="info" style="margin-left: 8px;">
           {{ collectionDetailStore.img ? '图片合集' : '视频合集' }}
         </n-tag>
@@ -31,7 +31,9 @@
     </div>
 
     <!-- 合集信息卡片：封面 + 表单 两栏布局 -->
-    <div class="info-card">
+    <n-alert v-if="detailError" type="error" :bordered="false" style="margin-bottom: 20px;">{{ detailError }} <n-button text type="error" @click="loadCollection">重新加载</n-button></n-alert>
+    <n-skeleton v-if="detailLoading" height="360px" style="border-radius: 14px; margin-bottom: 24px;" />
+    <div v-if="collection.id && !detailLoading" class="info-card">
       <!-- 左侧：封面 -->
       <div class="cover-section">
         <div class="cover-frame">
@@ -49,7 +51,7 @@
             <span class="cover-empty-text">暂无封面</span>
           </div>
         </div>
-        <n-button class="cover-btn" @click="chooseCover" block secondary>
+        <n-button class="cover-btn" @click="chooseCover" block secondary :loading="coverSaving">
           <template #icon><n-icon><ImageEdit24Regular /></n-icon></template>
           更换封面
         </n-button>
@@ -64,7 +66,7 @@
       <!-- 右侧：表单 -->
       <div class="form-section">
         <div class="section-label">基本信息</div>
-        <n-form :model="collection" label-placement="top">
+        <n-form :model="collection" label-placement="top" :disabled="saving">
           <n-form-item label="合集名称">
             <n-input
               v-model:value="collection.name"
@@ -89,16 +91,16 @@
           <n-text depth="3">公开合集只展示其中已公开的媒体，不会改变成员的可见性。</n-text>
         </n-form>
         <div class="form-actions">
-          <n-button type="primary" size="large" @click="saveCollection">
+          <n-button type="primary" size="large" :loading="saving" @click="saveCollection">
             <template #icon><n-icon><Save24Regular /></n-icon></template>
-            保存
+            保存修改
           </n-button>
         </div>
       </div>
     </div>
 
     <!-- 媒体管理卡片 -->
-    <div class="media-card">
+    <div v-if="collection.id && !detailLoading" class="media-card">
       <div class="media-header">
         <div class="media-header-left">
           <n-icon size="18" class="media-icon">
@@ -124,12 +126,14 @@
     v-model:show="showCoverModal"
     title="选择封面"
     preset="card"
-    style="width: 80vw; height: 80vh;"
+    style="width: min(1100px, calc(100vw - 32px)); height: 80vh;"
     :mask-closable="false"
+    :closable="!coverSaving"
+    :close-on-esc="!coverSaving"
   >
-    <div style="height: calc(80vh - 120px);">
+    <n-spin :show="coverSaving" style="height: calc(80vh - 120px);">
       <CoverImageSelector @cover-selected="handleCoverSelected" />
-    </div>
+    </n-spin>
   </n-modal>
 
   <!-- 添加视频/图片到合集弹窗：大图标网格 -->
@@ -137,8 +141,10 @@
     v-model:show="showAddItemsModal"
     :title="'添加' + (collectionDetailStore.img ? '图片' : '视频') + '到合集'"
     preset="card"
-    style="width: 86vw; max-width: 1280px;"
+    style="width: min(1280px, calc(100vw - 32px));"
     :mask-closable="false"
+    :closable="!addingItems"
+    :close-on-esc="!addingItems"
   >
     <!-- 工具栏：搜索 + 全选 + 计数 -->
     <div class="add-items-toolbar">
@@ -146,16 +152,17 @@
         v-model:value="addItemsKeyword"
         :placeholder="`搜索${collectionDetailStore.img ? '图片' : '视频'}标题 / 文件名`"
         clearable
-        style="width: 280px"
+        style="width: min(280px, 100%)"
+        :disabled="addingItems"
         @keyup.enter="handleAddItemsSearch"
         @clear="handleAddItemsSearch"
       >
         <template #prefix><n-icon><Search24Regular /></n-icon></template>
       </n-input>
-      <n-button ghost type="primary" @click="handleAddItemsSearch">搜索</n-button>
+      <n-button secondary type="primary" :loading="addItemsLoading" :disabled="addingItems" @click="handleAddItemsSearch">搜索</n-button>
       <n-button
         size="small"
-        :disabled="selectablePageItems.length === 0"
+        :disabled="selectablePageItems.length === 0 || addItemsLoading || addingItems"
         @click="toggleSelectAllInPage"
       >
         {{ isAllPageSelected ? '取消本页全选' : '本页全选' }}
@@ -167,9 +174,10 @@
       </div>
     </div>
 
+    <n-alert v-if="addItemsError" type="error" :bordered="false" style="margin-bottom: 16px;">{{ addItemsError }} <n-button text type="error" @click="fetchAllItems">重新加载</n-button></n-alert>
     <n-spin :show="addItemsLoading">
       <div class="add-items-grid-wrapper">
-        <div v-if="!addItemsLoading && allItems.length === 0" class="add-items-empty">
+        <div v-if="!addItemsLoading && !addItemsError && allItems.length === 0" class="add-items-empty">
           <n-empty :description="`暂无${collectionDetailStore.img ? '图片' : '视频'}`" />
         </div>
         <div v-else class="add-items-grid">
@@ -185,6 +193,13 @@
               },
             ]"
             @click="togglePickItem(item)"
+            role="checkbox"
+            :tabindex="isItemInCurrentCollection(item) || addingItems ? -1 : 0"
+            :aria-checked="addItemsSelectedKeys.includes(item.id)"
+            :aria-disabled="isItemInCurrentCollection(item) || addingItems"
+            :aria-label="getItemTitle(item)"
+            @keydown.enter.prevent="togglePickItem(item)"
+            @keydown.space.prevent="togglePickItem(item)"
           >
             <div class="pick-card__cover">
               <img
@@ -224,22 +239,25 @@
       </div>
     </n-spin>
 
-    <n-flex justify="space-between" align="center" style="margin-top: 16px;">
+    <n-flex justify="space-between" align="center" class="add-items-footer">
       <n-pagination
         v-model:page="addItemsPage"
         v-model:page-size="addItemsPageSize"
         :item-count="addItemsTotalCount"
         show-size-picker
         :page-sizes="[12, 24, 48]"
+        :page-slot="5"
+        :disabled="addingItems || addItemsLoading"
         @update:page="fetchAllItems"
         @update:page-size="handleAddItemsPageSizeChange"
       />
       <n-flex>
-        <n-button @click="showAddItemsModal = false">取消</n-button>
+        <n-button :disabled="addingItems" @click="showAddItemsModal = false">取消</n-button>
         <n-button
           type="primary"
           @click="confirmAddItems"
           :disabled="addItemsSelectedKeys.length === 0"
+          :loading="addingItems"
         >
           添加选中 ({{ addItemsSelectedKeys.length }})
         </n-button>
@@ -255,7 +273,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeMount, onMounted } from 'vue'
+import { ref, computed, onBeforeMount, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import dayjs from 'dayjs'
@@ -293,6 +311,10 @@ const id = Array.isArray(idParam) ? parseInt(idParam[0], 10) : parseInt(idParam 
 
 const collection = ref<any>({})
 const refreshKey = ref(0)
+const detailLoading = ref(true)
+const detailError = ref('')
+const saving = ref(false)
+const coverSaving = ref(false)
 
 // ==================== 分享 ====================
 const shareDialogShow = ref(false)
@@ -312,6 +334,9 @@ function openShareDialog() {
 // ==================== 添加视频/图片到合集 ====================
 const showAddItemsModal = ref(false)
 const addItemsLoading = ref(false)
+const addItemsError = ref('')
+const addingItems = ref(false)
+let itemsRequestId = 0
 const allItems = ref<any[]>([])
 const addItemsSelectedKeys = ref<number[]>([])
 const addItemsPage = ref(1)
@@ -328,7 +353,9 @@ function openAddItemsModal() {
 }
 
 async function fetchAllItems() {
+  const current = ++itemsRequestId
   addItemsLoading.value = true
+  addItemsError.value = ''
   try {
     if (collectionDetailStore.img) {
       // type 留空 = 不限类型；后端 `type` 为 null 时返回全量
@@ -337,6 +364,7 @@ async function fetchAllItems() {
         pageSize: addItemsPageSize.value,
         keyword: addItemsKeyword.value || undefined,
       })
+      if (current !== itemsRequestId) return
       allItems.value = res.data || []
       addItemsTotalCount.value = res.total || 0
     } else {
@@ -346,13 +374,14 @@ async function fetchAllItems() {
         collectionId: 0,
         keyword: addItemsKeyword.value || undefined,
       })
+      if (current !== itemsRequestId) return
       allItems.value = res.data || []
       addItemsTotalCount.value = res.total || 0
     }
   } catch {
-    message.error('加载数据失败')
+    if (current === itemsRequestId) { allItems.value = []; addItemsTotalCount.value = 0; addItemsError.value = '媒体加载失败，请重试。' }
   } finally {
-    addItemsLoading.value = false
+    if (current === itemsRequestId) addItemsLoading.value = false
   }
 }
 
@@ -382,6 +411,7 @@ function isItemInCurrentCollection(item: any): boolean {
 }
 
 function togglePickItem(item: any) {
+  if (isItemInCurrentCollection(item) || addingItems.value || addItemsLoading.value) return
   const idx = addItemsSelectedKeys.value.indexOf(item.id)
   if (idx >= 0) {
     addItemsSelectedKeys.value.splice(idx, 1)
@@ -416,7 +446,8 @@ function toggleSelectAllInPage() {
 }
 
 async function confirmAddItems() {
-  if (addItemsSelectedKeys.value.length === 0) return
+  if (addItemsSelectedKeys.value.length === 0 || addingItems.value) return
+  addingItems.value = true
   try {
     if (collectionDetailStore.img) {
       await addImagesToCollections({
@@ -434,14 +465,19 @@ async function confirmAddItems() {
     refreshKey.value++
   } catch {
     message.error('添加失败')
+  } finally {
+    addingItems.value = false
   }
 }
 
 async function saveCollection() {
+  if (saving.value || !collection.value.id) return
+  if (!collection.value.name?.trim()) { message.warning('请输入合集名称'); return }
+  saving.value = true
   try {
     const params = {
       id: collection.value.id,
-      name: collection.value.name,
+      name: collection.value.name.trim(),
       description: collection.value.description,
       visibility: collection.value.visibility ?? 'private'
     }
@@ -453,6 +489,8 @@ async function saveCollection() {
     message.success('保存成功')
   } catch {
     message.error('保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -462,28 +500,39 @@ function chooseCover() {
   showCoverModal.value = true
 }
 
-function handleCoverSelected(image: ImageItem) {
-  collection.value.imageUrl = image.imageUrl
-  showCoverModal.value = false
-  if (collectionDetailStore.img) {
-    updateImageCollectionCover(collection.value.id, image.id)
-  } else {
-    updateVideoCollectionCover(collection.value.id, image.id)
-  }
+async function handleCoverSelected(image: ImageItem) {
+  if (coverSaving.value) return
+  coverSaving.value = true
+  try {
+    if (collectionDetailStore.img) await updateImageCollectionCover(collection.value.id, image.id)
+    else await updateVideoCollectionCover(collection.value.id, image.id)
+    collection.value.imageUrl = image.imageUrl
+    showCoverModal.value = false
+    message.success('封面已更新')
+  } catch { message.error('封面更新失败，请重试') }
+  finally { coverSaving.value = false }
 }
 
 function goList() {
   router.push('/manager/collection')
 }
 
-onMounted(async () => {
-  const res: any = collectionDetailStore.img
-    ? await fetchImageCollectionWithCover(id)
-    : await fetchCollectionWithCover(id)
-  collection.value = res?.data ?? res
-})
+async function loadCollection() {
+  detailLoading.value = true
+  detailError.value = ''
+  try {
+    if (!Number.isFinite(id) || id <= 0) throw new Error('invalid id')
+    const res: any = collectionDetailStore.img ? await fetchImageCollectionWithCover(id) : await fetchCollectionWithCover(id)
+    const data = res?.data ?? res
+    if (!data?.id) throw new Error('not found')
+    collection.value = { ...data, visibility: data.visibility ?? 'private' }
+  } catch { detailError.value = '无法加载该合集，它可能已被删除或暂时无法访问。' }
+  finally { detailLoading.value = false }
+}
+onMounted(loadCollection)
 
 onBeforeMount(() => {
+  if (route.query.type === 'image' || route.query.type === 'video') collectionDetailStore.img = route.query.type === 'image'
   const idParam = route.params.id
   const id = Array.isArray(idParam) ? parseInt(idParam[0], 10) : parseInt(idParam as any, 10)
   if (collectionDetailStore.img) {
@@ -492,13 +541,12 @@ onBeforeMount(() => {
     collectionStore.setCollection(isNaN(id) ? null : id)
   }
 })
+onBeforeUnmount(() => { itemsRequestId++; imageManagerStore.setCollection(null); collectionStore.setCollection(null) })
 </script>
 
 <style scoped>
 .detail-page {
-  padding: 32px 40px;
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 /* 页头 */
@@ -519,6 +567,8 @@ onBeforeMount(() => {
 .header-title {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .page-title {
@@ -526,6 +576,7 @@ onBeforeMount(() => {
   font-weight: 700;
   margin: 0;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 /* 合集信息卡片 */
@@ -646,6 +697,7 @@ onBeforeMount(() => {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
+  flex-wrap: wrap;
 }
 
 .add-items-toolbar__right {
@@ -698,6 +750,7 @@ onBeforeMount(() => {
 
 .pick-card--in-collection {
   opacity: 0.78;
+  cursor: not-allowed;
 }
 .pick-card--in-collection:hover {
   opacity: 1;
@@ -786,4 +839,10 @@ onBeforeMount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pick-card:focus-visible { outline: 3px solid var(--admin-accent, #2f7b5b); outline-offset: 2px; }
+.add-items-footer { margin-top: 16px; gap: 16px; }
+.add-items-footer :deep(.n-pagination) { max-width: 100%; overflow-x: auto; }
+.media-body :deep(.admin-page) { padding: 0; }
+@media (max-width: 760px) { .info-card { flex-direction: column; gap: 20px; padding: 18px; }.cover-section { flex-basis: auto; }.cover-frame { width: 100%; max-width: 420px; }.media-header { padding: 16px; gap: 12px; flex-wrap: wrap; }.media-body { padding: 16px; }.add-items-toolbar__right { width: 100%; margin-left: 0; }.add-items-grid { grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px; }.add-items-grid-wrapper { min-height: 200px; max-height: 50vh; } }
+@media (prefers-reduced-motion: reduce) { .pick-card, .pick-card__check { transition: none; }.pick-card:hover { transform: none; } }
 </style>

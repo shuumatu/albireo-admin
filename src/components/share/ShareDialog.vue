@@ -17,11 +17,12 @@
     :title="dialogTitle"
     :mask-closable="stage !== 'creating'"
     :close-on-esc="stage !== 'creating'"
+    :closable="stage !== 'creating'"
   >
     <!-- 阶段一：表单 + 预览（form / creating 共用一份 UI，creating 时整体 disabled） -->
     <div v-if="stage !== 'result'">
       <div v-if="target" class="share-preview">
-        <img v-if="target.coverUrl" :src="target.coverUrl" class="preview-thumb" />
+        <img v-if="target.coverUrl" :src="target.coverUrl" :alt="target.name" class="preview-thumb" />
         <div v-else class="preview-placeholder">
           <n-icon :component="placeholderIcon" size="40" color="#999" />
         </div>
@@ -33,7 +34,7 @@
         </div>
       </div>
       <n-divider style="margin: 12px 0;" />
-      <n-form :model="form" label-width="100" label-placement="left" :disabled="stage === 'creating'">
+      <n-form :model="form" label-placement="top" :disabled="stage === 'creating'">
         <n-form-item label="自定义标题">
           <n-input v-model:value="form.title" placeholder="留空使用原资源标题" maxlength="80" show-count />
         </n-form-item>
@@ -47,7 +48,7 @@
           <n-date-picker v-model:value="expireTs" type="datetime" clearable style="width: 100%" />
         </n-form-item>
         <n-form-item label="最大访问次数">
-          <n-input-number v-model:value="form.maxViews" placeholder="留空不限制" style="width: 100%" :min="1" :show-button="false" />
+          <n-input-number v-model:value="form.maxViews" placeholder="留空不限制" style="width: 100%" :min="1" :precision="0" :show-button="false" />
         </n-form-item>
       </n-form>
     </div>
@@ -173,10 +174,12 @@ function reset() {
 }
 
 function close() {
+  if (stage.value === 'creating') return
   emit('update:show', false)
 }
 
 function onUpdateShow(value: boolean) {
+  if (!value && stage.value === 'creating') return
   emit('update:show', value)
 }
 
@@ -187,6 +190,7 @@ watch(() => props.show, (val) => {
 })
 
 async function handleCreate() {
+  if (stage.value !== 'form') return
   if (!props.target) {
     message.error('未指定分享对象')
     return
@@ -205,7 +209,10 @@ async function handleCreate() {
     }
     payload.expiresAt = new Date(expireTs.value).toISOString()
   }
-  if (form.value.maxViews && form.value.maxViews > 0) payload.maxViews = form.value.maxViews
+  if (form.value.maxViews !== null) {
+    if (!Number.isSafeInteger(form.value.maxViews) || form.value.maxViews < 1) { message.warning('最大访问次数必须是正整数'); return }
+    payload.maxViews = form.value.maxViews
+  }
 
   stage.value = 'creating'
   try {

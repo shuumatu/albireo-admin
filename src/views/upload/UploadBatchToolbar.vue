@@ -12,12 +12,14 @@
       <n-select
         v-model:value="sortKey"
         size="small"
+        aria-label="任务排序依据"
         :options="sortOptions"
         style="width: 130px"
       />
       <n-button
         size="small"
         quaternary
+        :aria-label="sortAsc ? '切换为降序' : '切换为升序'"
         :title="sortAsc ? '升序' : '降序'"
         @click="sortAsc = !sortAsc"
       >
@@ -117,7 +119,7 @@ const sortOptions = [
 const canPauseAny = computed(
   () => stats.value.uploading > 0 || stats.value.queued > 0,
 )
-const canResumeAny = computed(() => stats.value.paused > 0)
+const canResumeAny = computed(() => store.tasks.some((task) => task.status === 'paused' && !task.isStale))
 </script>
 
 <style scoped>
@@ -127,7 +129,10 @@ const canResumeAny = computed(() => stats.value.paused > 0)
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 4px 0;
+  padding: 16px;
+  background: var(--n-card-color, #fff);
+  border: 1px solid var(--n-border-color, #e0e9e1);
+  border-radius: 14px;
 }
 .upload-toolbar__left,
 .upload-toolbar__right {
@@ -139,4 +144,8 @@ const canResumeAny = computed(() => stats.value.paused > 0)
     align-items: stretch;
   }
 }
+
+.upload-toolbar__left { min-width: 0; max-width: 100%; }
+.upload-toolbar__left :deep(.n-radio-group) { max-width: 100%; overflow-x: auto; display: flex; padding-bottom: 3px; }
+.upload-toolbar__left :deep(.n-radio-button) { flex-shrink: 0; }
 </style>

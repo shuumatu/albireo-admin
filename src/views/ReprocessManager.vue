@@ -1,6 +1,6 @@
 <template>
-  <div class="rp-page">
-    <header class="rp-header">
+  <div class="rp-page admin-page">
+    <header class="rp-header admin-page-header">
       <div class="rp-title-line">
         <h2 class="rp-title">重新处理</h2>
         <n-tag v-if="totalCount > 0" type="warning" size="small" round>
@@ -9,11 +9,13 @@
         <span v-if="lastUpdatedText" class="rp-updated">最近刷新 {{ lastUpdatedText }}</span>
       </div>
       <div class="rp-actions">
-        <n-switch v-model:value="autoRefresh" size="small" />
+        <n-switch v-model:value="autoRefresh" size="small" aria-label="自动刷新重新处理列表" />
         <span class="rp-actions-label">自动刷新</span>
         <n-button :loading="loading" size="small" tertiary @click="loadPage">刷新</n-button>
       </div>
     </header>
+    <p class="rp-description">集中恢复处理失败的媒体，保留已经生成的可用版本。</p>
+    <n-alert v-if="loadError" type="error" class="rp-help">{{ loadError }}</n-alert>
 
     <n-alert type="info" :show-icon="false" class="rp-help">
       <p>
@@ -30,13 +32,15 @@
       </p>
     </n-alert>
 
+    <div class="rp-toolbar admin-toolbar"><n-input v-model:value="keyword" clearable placeholder="筛选本页文件名或 Hash" aria-label="筛选本页文件" /><span>当前页筛选 · 每 10 秒自动刷新</span></div>
     <n-tabs v-model:value="activeTab" type="line" size="small" @update:value="onTabChange">
       <n-tab-pane name="video" :tab="`视频 (${page.videoTotal})`">
         <n-data-table
           class="rp-table"
           remote
           :columns="videoColumns"
-          :data="page.video"
+          :data="filteredVideos"
+          :scroll-x="980"
           :loading="loading"
           :pagination="paginationProps"
           :row-key="(r: ReprocessVideoRow) => r.hash"
@@ -53,7 +57,8 @@
           class="rp-table"
           remote
           :columns="imageColumns"
-          :data="page.image"
+          :data="filteredImages"
+          :scroll-x="800"
           :loading="loading"
           :pagination="paginationProps"
           :row-key="(r: ReprocessImageRow) => r.hash"
@@ -106,6 +111,14 @@ const pageNo = ref(1)
 const pageSize = ref(20)
 const page = ref<ReprocessListResponse>({ videoTotal: 0, imageTotal: 0, video: [], image: [] })
 const loading = ref(false)
+const loadError = ref('')
+const keyword = ref('')
+const matchesKeyword = (row: { fileName?: string | null; hash: string }) => (String(row.fileName ?? '') + ' ' + row.hash).toLowerCase().includes(keyword.value.trim().toLowerCase())
+const filteredVideos = computed(() => page.value.video.filter(matchesKeyword))
+const filteredImages = computed(() => page.value.image.filter(matchesKeyword))
+let loadSequence = 0
+let disposed = false
+let retryTimer: ReturnType<typeof setTimeout> | null = null
 const retryingHash = ref<string | null>(null)
 const autoRefresh = ref(true)
 const lastUpdatedAt = ref<number | null>(null)
@@ -134,18 +147,23 @@ const paginationProps = computed(() => ({
 }))
 
 async function loadPage() {
+  if (disposed) return
+  const sequence = ++loadSequence
   loading.value = true
   try {
-    page.value = await fetchReprocessList({
+    const result = await fetchReprocessList({
       page: pageNo.value,
       pageSize: pageSize.value,
       type: activeTab.value,
     })
+    if (disposed || sequence !== loadSequence) return
+    page.value = result
+    loadError.value = ''
     lastUpdatedAt.value = Date.now()
   } catch (err: any) {
-    message.error(`加载重新处理列表失败：${err?.message ?? '未知错误'}`)
+    if (!disposed && sequence === loadSequence) loadError.value = `加载失败，已保留上次结果：${err?.message ?? '请稍后刷新重试'}`
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -159,11 +177,13 @@ function onPageSizeChange(s: number) {
   loadPage()
 }
 function onTabChange() {
+  keyword.value = ''
   pageNo.value = 1
   loadPage()
 }
 
 async function onRetry(mediaType: 'video' | 'image', hash: string) {
+  if (retryingHash.value) return
   retryingHash.value = hash
   try {
     const res = await retryReprocess(mediaType, hash)
@@ -173,7 +193,7 @@ async function onRetry(mediaType: 'video' | 'image', hash: string) {
         : '处理任务已重投'
       message.success(`已重新投递: ${detail}`)
       // worker 落库需要一拍
-      setTimeout(loadPage, 1000)
+      if (!disposed) { if (retryTimer) clearTimeout(retryTimer); retryTimer = setTimeout(loadPage, 1000) }
     } else {
       message.error(res?.error ?? '重投失败')
     }
@@ -304,6 +324,7 @@ const videoColumns = computed<DataTableColumns<ReprocessVideoRow>>(() => [
           type: 'warning',
           tertiary: true,
           loading: retryingHash.value === row.hash,
+          disabled: retryingHash.value !== null && retryingHash.value !== row.hash,
           onClick: () => onRetry('video', row.hash),
         },
         { default: () => (noWork ? '回到处理流程' : '重新处理') }
@@ -363,6 +384,7 @@ const imageColumns = computed<DataTableColumns<ReprocessImageRow>>(() => [
           type: 'warning',
           tertiary: true,
           loading: retryingHash.value === row.hash,
+          disabled: retryingHash.value !== null && retryingHash.value !== row.hash,
           onClick: () => onRetry('image', row.hash),
         },
         { default: () => '重新处理' }
@@ -373,7 +395,7 @@ const imageColumns = computed<DataTableColumns<ReprocessImageRow>>(() => [
 function startPolling() {
   stopPolling()
   // 重新处理页不像处理进度页那么频繁；10s 一次足够看到 worker 完成回填
-  timer = setInterval(loadPage, 10_000)
+  timer = setInterval(() => { if (!document.hidden && !loading.value) void loadPage() }, 10_000)
 }
 function stopPolling() {
   if (timer) {
@@ -395,6 +417,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  loadSequence++
+  if (retryTimer) clearTimeout(retryTimer)
   stopPolling()
   if (nowTimer) {
     clearInterval(nowTimer)
@@ -404,6 +429,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.rp-description { margin: 0 0 22px; color: var(--n-text-color-3); font-size: 13px; }.rp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 14px; margin: 18px 0 10px; }.rp-toolbar .n-input { max-width: 330px; }.rp-toolbar span { color: var(--n-text-color-3); font-size: 12px; white-space: nowrap; }
+@media(max-width:680px) { .rp-page { padding: 20px 16px !important; }.rp-title-line { flex-wrap: wrap; }.rp-toolbar { align-items: stretch; flex-direction: column; }.rp-toolbar .n-input { max-width: none; } }
 .rp-page {
   padding: 20px 32px 40px;
   max-width: 1280px;

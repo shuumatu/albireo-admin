@@ -1,11 +1,11 @@
 <template>
-  <div class="share-manager-page">
+  <div class="share-manager-page admin-page">
     <n-card class="page-card">
       <!-- 顶部说明 + 跳转按钮 -->
       <template #header>
-        <div class="header">
+        <div class="header admin-page-header">
           <div class="header-left">
-            <h2 class="page-title">我的分享</h2>
+            <h1 class="page-title">分享管理</h1>
             <p class="page-subtitle">
               管理你已创建的分享链接。要新建分享，请到
               <n-button text type="primary" @click="goImage">图片</n-button>
@@ -27,21 +27,23 @@
       <n-flex align="center" :wrap="true" class="filter-bar">
         <n-input
           v-model:value="keyword"
-          placeholder="搜索标题 / 描述"
-          style="width: 240px"
+          placeholder="搜索标题 / 描述 / 分享码"
+          style="width: min(280px, 100%)"
+          aria-label="搜索分享"
           clearable
           @keyup.enter="onFilterChange"
           @clear="onFilterChange"
         >
           <template #prefix><n-icon :component="SearchOutline" /></template>
         </n-input>
+        <n-button type="primary" secondary :loading="loading" @click="onFilterChange">搜索</n-button>
         <n-select
           v-model:value="filterType"
           :options="targetTypeFilterOptions"
           placeholder="全部类型"
           style="width: 120px"
           clearable
-          @update:value="onFilterChange"
+          @update:value="applyFilters"
         />
         <n-select
           v-model:value="filterStatus"
@@ -49,14 +51,16 @@
           placeholder="全部状态"
           style="width: 120px"
           clearable
-          @update:value="onFilterChange"
+          @update:value="applyFilters"
         />
+        <n-button v-if="hasFilters" @click="resetFilters">重置筛选</n-button>
         <span style="flex: 1 1 auto;" />
         <n-text depth="3" v-if="!loading">
-          共 {{ totalRaw }} 条 · 当前显示 {{ filteredCount }} 条
+          共 {{ totalRaw }} 条{{ hasFilters ? ` · 匹配 ${filteredCount} 条` : '' }}
         </n-text>
       </n-flex>
-
+      <n-alert v-if="loadError" type="error" :bordered="false" class="status-alert">{{ loadError }} <n-button text type="error" @click="fetchShares">重新加载</n-button></n-alert>
+      <n-text v-if="loading && hasFilters" depth="3" class="filter-progress" aria-live="polite">正在检索全部分享{{ loadedCount ? `，已读取 ${loadedCount} 条` : '…' }}</n-text>
       <n-data-table
         :columns="columns"
         :data="displayShares"
@@ -66,12 +70,14 @@
         @update:page="handlePageChange"
         @update:page-size="handlePageSizeChange"
         :row-key="(row: ShareVO) => row.id"
-      />
+        :scroll-x="1080"
+        :bordered="false"
+      ><template #empty><n-empty :description="loadError ? '列表暂时不可用，请重新加载' : hasFilters ? '没有找到匹配的分享，试试调整筛选条件' : '还没有分享，从图片、视频或合集页面创建一个吧'" /></template></n-data-table>
     </n-card>
 
     <!-- ==================== 编辑分享弹窗 ==================== -->
-    <n-modal v-model:show="showEditModal" title="编辑分享" preset="card" style="width: 540px;">
-      <n-form :model="editForm" label-width="120" label-placement="left">
+    <n-modal v-model:show="showEditModal" title="编辑分享" preset="card" style="width: min(540px, calc(100vw - 32px));" :mask-closable="!submitting" :close-on-esc="!submitting" :closable="!submitting">
+      <n-form :model="editForm" label-placement="top" :disabled="submitting">
         <n-form-item label="标题">
           <n-input v-model:value="editForm.title" placeholder="留空使用原资源标题" maxlength="80" show-count clearable />
         </n-form-item>
@@ -104,6 +110,7 @@
               placeholder="不限制"
               style="flex: 1 1 auto;"
               :min="1"
+              :precision="0"
               :show-button="false"
               :disabled="editForm.clearMaxViews"
             />
@@ -113,15 +120,17 @@
       </n-form>
       <template #action>
         <n-space justify="end">
-          <n-button @click="showEditModal = false">取消</n-button>
+          <n-button :disabled="submitting" @click="showEditModal = false">取消</n-button>
           <n-button type="primary" @click="handleUpdate" :loading="submitting">保存</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- ==================== 统计弹窗 ==================== -->
-    <n-modal v-model:show="showStatsModal" title="访问统计" preset="card" style="width: 720px;">
+    <n-modal v-model:show="showStatsModal" title="访问统计" preset="card" style="width: min(720px, calc(100vw - 32px));">
       <n-spin :show="statsLoading">
+        <n-alert v-if="statsError" type="error" :bordered="false">统计加载失败。<n-button text type="error" @click="openStatsModal(statsId)">重试</n-button></n-alert>
+        <n-skeleton v-if="statsLoading" height="180px" />
         <template v-if="stats">
           <n-grid :cols="2" :x-gap="16" :y-gap="12" class="stats-overview">
             <n-gi>
@@ -138,18 +147,19 @@
           <n-divider />
           <n-h4>最近访问记录</n-h4>
           <n-empty v-if="stats.recentAccess.length === 0" description="暂无访问记录" />
-          <n-data-table v-else :columns="accessColumns" :data="stats.recentAccess" :pagination="false" size="small" :max-height="300" />
+          <n-data-table v-else :columns="accessColumns" :data="stats.recentAccess" :pagination="false" size="small" :max-height="300" :scroll-x="550" />
         </template>
       </n-spin>
     </n-modal>
 
     <!-- ==================== 二维码 / 链接弹窗 ==================== -->
-    <n-modal v-model:show="showQRModal" title="分享链接" preset="card" style="width: 420px;">
+    <n-modal v-model:show="showQRModal" title="分享链接" preset="card" style="width: min(420px, calc(100vw - 32px));">
       <div class="qr-container">
-        <img :src="qrCodeUrl" alt="分享二维码" class="qr-image" />
+        <n-empty v-if="qrError" description="二维码暂时无法加载，可复制下方链接"><template #extra><n-button size="small" @click="retryQR">重试</n-button></template></n-empty>
+        <img v-else :src="qrCodeUrl" alt="分享二维码" class="qr-image" @error="qrError = true" />
         <n-input :value="currentShareUrl" readonly class="share-url-input">
           <template #suffix>
-            <n-button text @click="copyUrl(currentShareUrl)">
+            <n-button text aria-label="复制分享链接" @click="copyUrl(currentShareUrl)">
               <template #icon><n-icon :component="CopyOutline" /></template>
             </n-button>
           </template>
@@ -163,13 +173,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onMounted, watch } from 'vue'
+import { ref, computed, h, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NButton, NIcon, NInput, NSelect, NDataTable, NFlex, NText,
   NModal, NForm, NFormItem, NDatePicker, NInputNumber, NSwitch, NCheckbox,
   NSpace, NSpin, NGrid, NGi, NStatistic, NDivider, NH4, NEmpty,
-  NDropdown, NTag, NPopconfirm,
+  NDropdown, NTag, NPopconfirm, NAlert, NSkeleton,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -199,8 +209,14 @@ const loading = ref(false)
 const sharePage = ref(1)
 const sharePageSize = ref(20)
 const totalRaw = ref(0)
+const loadError = ref('')
+const loadedCount = ref(0)
+const allShares = ref<ShareVO[] | null>(null)
+const busyIds = ref(new Set<number>())
+let listRequestId = 0
 
 const keyword = ref('')
+const appliedKeyword = ref('')
 const filterType = ref<ShareTargetType | null>(null)
 const filterStatus = ref<ShareStatus | null>(null)
 
@@ -216,68 +232,79 @@ const statusFilterOptions = [
   { label: '已停用', value: 'disabled' }
 ]
 
-/**
- * 当前页客户端二次过滤：分享接口未支持服务端筛选，先在已加载页内做筛选；
- * 列表的 itemCount 仍按服务端总数显示——避免因为筛选把页码变掉造成翻页错乱。
- * 用户切换筛选后会重置到第一页，配合服务端分页拉新数据。
- */
-const displayShares = computed(() => {
-  let list = shareList.value
-  if (filterType.value) {
-    list = list.filter(s => s.targetType === filterType.value)
-  }
-  if (filterStatus.value) {
-    list = list.filter(s => s.status === filterStatus.value)
-  }
-  if (keyword.value.trim()) {
-    const kw = keyword.value.trim().toLowerCase()
-    list = list.filter(s =>
-      (s.title || '').toLowerCase().includes(kw)
-      || (s.description || '').toLowerCase().includes(kw)
-      || (s.shareCode || '').toLowerCase().includes(kw)
-    )
-  }
+// The API only supports pagination. Read pages sequentially when filtering so
+// matches are complete, and discard results superseded by a new request.
+const hasFilters = computed(() => !!(appliedKeyword.value || filterType.value || filterStatus.value))
+const filteredShares = computed(() => {
+  let list = allShares.value ?? []
+  if (filterType.value) list = list.filter(s => s.targetType === filterType.value)
+  if (filterStatus.value) list = list.filter(s => s.status === filterStatus.value)
+  const kw = appliedKeyword.value.toLocaleLowerCase()
+  if (kw) list = list.filter(s => [s.title, s.description, s.shareCode].some(value => (value || '').toLocaleLowerCase().includes(kw)))
   return list
 })
-
-const filteredCount = computed(() => displayShares.value.length)
-
+const filteredCount = computed(() => filteredShares.value.length)
+const displayShares = computed(() => hasFilters.value
+  ? filteredShares.value.slice((sharePage.value - 1) * sharePageSize.value, sharePage.value * sharePageSize.value)
+  : shareList.value)
 const pagination = computed(() => ({
-  page: sharePage.value,
-  pageSize: sharePageSize.value,
-  itemCount: totalRaw.value,
-  showSizePicker: true,
-  pageSizes: [10, 20, 50],
+  page: sharePage.value, pageSize: sharePageSize.value,
+  itemCount: hasFilters.value ? filteredCount.value : totalRaw.value,
+  showSizePicker: true, pageSizes: [10, 20, 50], pageSlot: 5,
   prefix: ({ itemCount }: { itemCount?: number }) => `共 ${itemCount ?? 0} 条`
 }))
 
 async function fetchShares() {
+  const current = ++listRequestId
+  const filtering = hasFilters.value
   loading.value = true
+  loadError.value = ''
+  loadedCount.value = 0
   try {
-    const res = await getMyShares(sharePage.value, sharePageSize.value)
-    shareList.value = res.data
-    totalRaw.value = res.total
+    if (filtering) {
+      const rows: ShareVO[] = []
+      const batchSize = 200
+      let nextPage = 1
+      let total = 0
+      do {
+        const res = await getMyShares(nextPage, batchSize)
+        if (current !== listRequestId) return
+        total = res.total
+        rows.push(...res.data)
+        loadedCount.value = rows.length
+        if (!res.data.length) break
+        nextPage++
+      } while ((nextPage - 1) * batchSize < total)
+      allShares.value = Array.from(new Map(rows.map(row => [row.id, row])).values())
+      totalRaw.value = total
+      sharePage.value = Math.min(sharePage.value, Math.max(1, Math.ceil(filteredCount.value / sharePageSize.value)))
+    } else {
+      const res = await getMyShares(sharePage.value, sharePageSize.value)
+      if (current !== listRequestId) return
+      shareList.value = res.data
+      totalRaw.value = res.total
+      const lastPage = Math.max(1, Math.ceil(res.total / sharePageSize.value))
+      if (sharePage.value > lastPage) { sharePage.value = lastPage; await fetchShares() }
+    }
   } catch {
-    message.error('获取分享列表失败')
-  } finally {
-    loading.value = false
-  }
+    if (current === listRequestId) {
+      loadError.value = '分享加载失败，请检查网络后重试。'
+      shareList.value = []; allShares.value = null
+    }
+  } finally { if (current === listRequestId) loading.value = false }
 }
-
-function onFilterChange() {
-  // 客户端筛选不需要重新拉数据，只重置当前页指示
-  // sharePage 不动，仍以服务端当前页为准
-}
-
-function handlePageChange(page: number) {
-  sharePage.value = page
-  fetchShares()
-}
-function handlePageSizeChange(size: number) {
-  sharePageSize.value = size
+function onFilterChange() { appliedKeyword.value = keyword.value.trim(); applyFilters() }
+function applyFilters() {
   sharePage.value = 1
-  fetchShares()
+  if (!hasFilters.value || !allShares.value || loading.value) void fetchShares()
 }
+function resetFilters() {
+  keyword.value = ''; appliedKeyword.value = ''; filterType.value = null; filterStatus.value = null
+  sharePage.value = 1
+  void fetchShares()
+}
+function handlePageChange(page: number) { sharePage.value = page; if (!hasFilters.value) void fetchShares() }
+function handlePageSizeChange(size: number) { sharePageSize.value = size; sharePage.value = 1; if (!hasFilters.value) void fetchShares() }
 
 // ==================== 编辑 ====================
 const showEditModal = ref(false)
@@ -319,10 +346,11 @@ function openEditModal(row: ShareVO) {
  * 显式发出，让用户能从 UI 把标题改回空。
  */
 async function handleUpdate() {
+  if (submitting.value) return
   const payload: ShareUpdateDTO = {}
 
-  payload.title = editForm.value.title
-  payload.description = editForm.value.description
+  payload.title = editForm.value.title.trim()
+  payload.description = editForm.value.description.trim()
 
   if (editForm.value.clearPassword) {
     payload.clearPassword = true
@@ -351,6 +379,7 @@ async function handleUpdate() {
     await updateShare(editingId.value, payload)
     message.success('更新成功')
     showEditModal.value = false
+    allShares.value = null
     await fetchShares()
   } catch (e: any) {
     message.error(e?.response?.data?.message || '更新失败')
@@ -361,51 +390,65 @@ async function handleUpdate() {
 
 // ==================== 启用 / 停用 ====================
 async function handleToggleStatus(row: ShareVO) {
+  if (busyIds.value.has(row.id)) return
   // expired 不允许直接转 active：先用 update 解除限制后再启用，更直观
   if (row.status === 'expired') {
     message.info('过期分享请先编辑取消过期时间或访问次数限制再启用')
     return
   }
   const next = row.status === 'active' ? 'disabled' : 'active'
+  busyIds.value.add(row.id)
   try {
     await updateShareStatus(row.id, next)
     message.success(next === 'active' ? '已启用' : '已停用')
+    allShares.value = null
     await fetchShares()
   } catch (e: any) {
     message.error(e?.response?.data?.message || '操作失败')
-  }
+  } finally { busyIds.value.delete(row.id) }
 }
 
 // ==================== 删除 ====================
 async function handleDelete(id: number) {
+  if (busyIds.value.has(id)) return false
+  busyIds.value.add(id)
   try {
     await deleteShare(id)
     message.success('删除成功')
     // 删完最后一条且不是首页时回退一页，避免空白页
-    if (shareList.value.length === 1 && sharePage.value > 1) {
+    if (displayShares.value.length === 1 && sharePage.value > 1) {
       sharePage.value -= 1
     }
+    allShares.value = null
     await fetchShares()
   } catch {
     message.error('删除失败')
-  }
+    return false
+  } finally { busyIds.value.delete(id) }
 }
 
 // ==================== 统计 ====================
 const showStatsModal = ref(false)
 const statsLoading = ref(false)
 const stats = ref<ShareStatsVO | null>(null)
+const statsId = ref(0)
+const statsError = ref(false)
+let statsRequestId = 0
 
 async function openStatsModal(id: number) {
+  const current = ++statsRequestId
+  statsId.value = id
+  statsError.value = false
   stats.value = null
   showStatsModal.value = true
   statsLoading.value = true
   try {
-    stats.value = await getShareStats(id)
+    const result = await getShareStats(id)
+    if (current === statsRequestId) stats.value = result
   } catch {
-    message.error('获取统计失败')
+    if (current === statsRequestId) statsError.value = true
   } finally {
-    statsLoading.value = false
+    if (current === statsRequestId) statsLoading.value = false
   }
 }
 
@@ -423,13 +466,19 @@ const accessColumns: DataTableColumns = [
 // ==================== 二维码 / 复制 ====================
 const showQRModal = ref(false)
 const qrCodeUrl = ref('')
+const qrError = ref(false)
+const currentShareCode = ref('')
 const currentShareUrl = ref('')
 
 function showQR(share: ShareVO) {
+  qrError.value = false
+  currentShareCode.value = share.shareCode
   qrCodeUrl.value = getShareQRCodeUrl(share.shareCode)
   currentShareUrl.value = share.shareUrl
   showQRModal.value = true
 }
+
+function retryQR() { qrError.value = false; qrCodeUrl.value = getShareQRCodeUrl(currentShareCode.value) }
 
 /**
  * 复制到剪贴板，HTTPS 环境用 Clipboard API，否则降级 execCommand。
@@ -499,6 +548,7 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
   {
     title: '标题',
     key: 'title',
+    minWidth: 190,
     ellipsis: { tooltip: true },
     render: (row) => row.title || `${formatTargetType(row.targetType)} #${row.targetId}`
   },
@@ -562,9 +612,9 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
         else if (key === 'toggle') handleToggleStatus(row)
       }
       return h('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
-        h(NButton, { size: 'small', onClick: () => openEditModal(row) }, { default: () => '编辑' }),
+        h(NButton, { size: 'small', disabled: busyIds.value.has(row.id), onClick: () => openEditModal(row) }, { default: () => '编辑' }),
         h(NDropdown, { trigger: 'click', options: moreOptions, onSelect: handleMoreSelect }, {
-          default: () => h(NButton, { size: 'small' }, { default: () => '更多' })
+          default: () => h(NButton, { size: 'small', disabled: busyIds.value.has(row.id) }, { default: () => '更多' })
         }),
         h(NPopconfirm, {
           onPositiveClick: () => handleDelete(row.id),
@@ -572,18 +622,14 @@ const columns = computed<DataTableColumns<ShareVO>>(() => [
           negativeText: '取消'
         }, {
           default: () => '确认删除此分享？访问日志也将一同清除。',
-          trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => '删除' })
+          trigger: () => h(NButton, { size: 'small', type: 'error', secondary: true, loading: busyIds.value.has(row.id) }, { default: () => '删除' })
         })
       ])
     }
   }
 ])
 
-watch([filterType, filterStatus], () => {
-  // 切换筛选回到第一页（服务端分页层面），重新拉数据让筛选生效在更大集合上
-  sharePage.value = 1
-  fetchShares()
-})
+onBeforeUnmount(() => { listRequestId++; statsRequestId++ })
 
 onMounted(() => {
   fetchShares()
@@ -592,12 +638,12 @@ onMounted(() => {
 
 <style scoped>
 .share-manager-page {
-  padding: 24px;
+  min-width: 0;
 }
 
 .page-card {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
+  border-radius: 14px;
 }
 
 .header {
@@ -613,8 +659,8 @@ onMounted(() => {
 }
 
 .page-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 700;
   margin: 0 0 4px;
 }
 
@@ -658,6 +704,9 @@ onMounted(() => {
 .share-url-input {
   width: 100%;
 }
+.status-alert { margin-bottom: 16px; }
+.filter-progress { display: block; margin-bottom: 14px; }
+@media (max-width: 640px) { .header { flex-wrap: wrap; }.filter-bar :deep(.n-input) { width: 100% !important; }.qr-image { width: min(240px, 100%); height: auto; aspect-ratio: 1; } }
 </style>
 
 

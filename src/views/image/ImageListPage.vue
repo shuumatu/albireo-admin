@@ -40,7 +40,15 @@
 
     <!-- 主内容 -->
     <div class="page-body" :class="`density-${state.density}`">
-      <n-spin :show="loading">
+      <div class="media-toolbar">
+        <n-checkbox :checked="allCurrentSelected" :indeterminate="someCurrentSelected && !allCurrentSelected" :disabled="loading || imageList.length === 0" @update:checked="onToggleAllPage">全选本页</n-checkbox>
+        <span class="media-toolbar__count" aria-live="polite">共 {{ total }} 张图片<template v-if="selection.hasSelection.value"> · 已选 {{ selection.selectedCount.value }} 项</template></span>
+        <div class="media-toolbar__actions">
+          <n-button :loading="loading" @click="loadImageList">刷新</n-button>
+          <n-button type="primary" @click="goUpload">上传图片</n-button>
+        </div>
+      </div>
+      <n-spin :show="loading" description="正在加载图片…">
         <!-- 网格视图 -->
         <div v-if="state.viewMode === 'grid'">
           <drag-select
@@ -49,7 +57,7 @@
             :clickOptionToSelect="false"
             :toggleKey="['ctrlKey', 'metaKey']"
             :rangeKey="['shiftKey']"
-            background="rgba(60, 213, 111, 0.1)"
+            background="rgba(47, 123, 91, 0.12)"
             @change="onDragSelectChange"
           >
             <div class="grid-wrap">
@@ -103,7 +111,7 @@
         </div>
 
         <!-- 空状态 -->
-        <div v-if="!loading && imageList.length === 0" class="empty-wrap">
+        <div v-if="!loading && !loadError && imageList.length === 0" class="empty-wrap">
           <n-empty
             :description="hasAnyFilter ? '没有匹配的图片' : '还没有上传过图片'"
           >
@@ -132,11 +140,13 @@
       </n-spin>
 
       <!-- 分页 -->
-      <div v-if="total > 0" class="pagination-wrap">
+      <div v-if="total > 0" class="pagination-wrap admin-pagination">
         <n-pagination
           v-model:page="paginationPage"
           :page-size="state.pageSize"
           :item-count="total"
+          :page-slot="5"
+          :disabled="loading"
           show-size-picker
           :page-sizes="[20, 40, 60, 100]"
           @update:page-size="(s: number) => query.setFilter({ pageSize: s })"
@@ -148,6 +158,7 @@
     <ImageFloatingActionBar
       :selected-count="selection.selectedCount.value"
       :cross-page-count="selection.crossPageSelectedCount.value"
+      :busy="batchBusy"
       :collections="allCollections"
       :is-in-collection-view="isInCollectionView"
       @add-to-collections="onBatchAddToCollections"
@@ -242,13 +253,15 @@ const imageList = ref<ImageItem[]>([])
 const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
+const batchBusy = ref(false)
+let listRequest = 0
 const allCollections = ref<{ id: number; name: string }[]>([])
 
 // ---------- 派生状态 ----------
 const failedCount = computed(() => imageList.value.filter((v) => imageNeedsAttention(v.status)).length)
 const dismissedFailedAlert = ref(false)
 function filterFailedOnly() {
-  query.setFilter({ status: 'failed' })
+  query.setFilter({ status: imageList.value.find((v) => imageNeedsAttention(v.status))?.status ?? 'failed' })
   dismissedFailedAlert.value = false
 }
 
@@ -304,6 +317,7 @@ watch(dragSelectedIds, (ids) => {
 
 // ---------- 数据加载 ----------
 async function loadImageList() {
+  const requestId = ++listRequest
   loading.value = true
   loadError.value = ''
   try {
@@ -328,16 +342,24 @@ async function loadImageList() {
       resp = (await fetchImages(params)) as unknown as { total: number; data: ImageItem[] }
     }
 
+    if (requestId !== listRequest) return
+    const lastPage = Math.max(1, Math.ceil((resp.total ?? 0) / state.value.pageSize))
+    if (state.value.page > lastPage) {
+      query.setFilter({ page: lastPage }, false)
+      return
+    }
     imageList.value = resp.data ?? []
     total.value = resp.total ?? 0
     selection.setCurrentPage(imageList.value)
     collectionStore.setCollection(state.value.collectionId)
   } catch (err: any) {
+    if (requestId !== listRequest) return
     loadError.value = err?.message ?? '未知错误'
     imageList.value = []
+    selection.setCurrentPage([])
     total.value = 0
   } finally {
-    loading.value = false
+    if (requestId === listRequest) loading.value = false
   }
 }
 
@@ -382,7 +404,7 @@ function clearPendingClick() {
   }
 }
 function onImageClick(image: ImageItem, ev: MouseEvent) {
-  if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+  if (selection.hasSelection.value || ev.ctrlKey || ev.metaKey || ev.shiftKey) {
     selection.handleClick(image.id, {
       ctrlKey: ev.ctrlKey,
       metaKey: ev.metaKey,
@@ -403,7 +425,7 @@ function onImageDblClick(image: ImageItem) {
 
 function openPublic(image: ImageItem) {
   const origin = getPublicSiteOrigin()
-  window.open(`${origin}/image/${image.uuid}`, '_blank')
+  window.open(`${origin}/image/${image.uuid}`, '_blank', 'noopener,noreferrer')
 }
 function onCheckClick(image: ImageItem, _ev: MouseEvent) {
   selection.toggle(image.id)
@@ -503,9 +525,8 @@ async function confirmDeleteOne(image: ImageItem) {
 }
 
 async function onRetry(_image: ImageItem) {
-  // TODO: 接入图片重试接口（当前后端尚无），刷新列表让用户感知到状态在拉
-  message.info('重试已发送（待接入对应后端接口）')
-  await loadImageList()
+  message.info(_image.status === 'process_failed' ? '请在重新处理页面提交图片处理任务' : '请重新选择原文件继续上传')
+  router.push(_image.status === 'process_failed' ? '/manager/reprocess' : '/upload')
 }
 
 // ---------- 抽屉编辑 ----------
@@ -554,13 +575,16 @@ async function onDrawerCollectionsChanged(imageId: number, collectionIds: number
 async function onBatchAddToCollections(collectionIds: number[]) {
   if (collectionIds.length === 0) return
   const ids = selection.selectedArray.value
-  if (ids.length === 0) return
+  if (ids.length === 0 || batchBusy.value) return
+  batchBusy.value = true
   try {
     await addImagesToCollections({ imageIds: ids, collectionIds })
     message.success(`已加入 ${collectionIds.length} 个合集`)
     await loadImageList()
   } catch (err: any) {
     message.error(`加合集失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    batchBusy.value = false
   }
 }
 
@@ -570,19 +594,25 @@ async function onBatchAddToCollections(collectionIds: number[]) {
  */
 async function onBatchChangeType(type: string) {
   const ids = selection.selectedArray.value
-  if (ids.length === 0) return
+  if (ids.length === 0 || batchBusy.value) return
+  batchBusy.value = true
   try {
-    await Promise.all(ids.map((id) => updateImage(id, { type }).catch((e) => e)))
-    message.success(`已批量改类型为 ${type}`)
+    const results = await Promise.allSettled(ids.map((id) => updateImage(id, { type })))
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed) message.warning(`已更新 ${ids.length - failed} 项，${failed} 项失败，可重新尝试`)
+    else message.success(`已更新 ${ids.length} 张图片的类型`)
     await loadImageList()
   } catch (err: any) {
     message.error(`批量改类型失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    batchBusy.value = false
   }
 }
 
 async function onBatchDeleteOrRemove() {
   const ids = selection.selectedArray.value
-  if (ids.length === 0) return
+  if (ids.length === 0 || batchBusy.value) return
+  batchBusy.value = true
   try {
     if (isInCollectionView.value && imageManagerStore.collectionId != null) {
       await removeImagesFromCollections({ imageIds: ids, collectionIds: [imageManagerStore.collectionId] })
@@ -595,7 +625,19 @@ async function onBatchDeleteOrRemove() {
     await loadImageList()
   } catch (err: any) {
     message.error(`操作失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    batchBusy.value = false
   }
+}
+
+function confirmKeyboardDelete() {
+  if (batchBusy.value) return
+  dialog.warning({
+    title: '确认批量操作',
+    content: isInCollectionView.value ? `确定从合集中移除已选 ${selection.selectedCount.value} 项？原始图片会保留。` : `确定删除已选 ${selection.selectedCount.value} 项？此操作不可恢复。`,
+    positiveText: '确认', negativeText: '取消',
+    onPositiveClick: () => onBatchDeleteOrRemove(),
+  })
 }
 
 function goUpload() {
@@ -605,7 +647,7 @@ function goUpload() {
 // ---------- 键盘快捷键 ----------
 function onGlobalKey(ev: KeyboardEvent) {
   const tag = (ev.target as HTMLElement)?.tagName
-  const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (ev.target as HTMLElement)?.isContentEditable
+  const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ev.target as HTMLElement)?.isContentEditable
 
   if (ev.key === '/' && !inEditable) {
     ev.preventDefault()
@@ -621,7 +663,7 @@ function onGlobalKey(ev: KeyboardEvent) {
     }
     return
   }
-  if (inEditable) return
+  if (inEditable || ev.isComposing || ev.ctrlKey || ev.metaKey || ev.altKey || document.querySelector('.n-dialog, .n-modal, [role="listbox"]')) return
 
   if (ev.key === 'a' && !ev.ctrlKey && !ev.metaKey) {
     ev.preventDefault()
@@ -641,7 +683,7 @@ function onGlobalKey(ev: KeyboardEvent) {
     return
   }
   if (ev.key === 'Delete' && selection.hasSelection.value) {
-    onBatchDeleteOrRemove()
+    confirmKeyboardDelete()
     return
   }
   // 抽屉打开时按 ↑/↓ 切换
@@ -679,6 +721,7 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKey)
 })
 onBeforeUnmount(() => {
+  listRequest++
   // 卸载时清掉等待中的"延迟单击"，避免组件销毁后 timer 触发 openDrawer / 抛错
   clearPendingClick()
   window.removeEventListener('keydown', onGlobalKey)
@@ -694,7 +737,7 @@ onBeforeUnmount(() => {
     页面底色：固定一档冷灰（#f5f6f8），让 #fff 卡片明显浮出来。
     与视频侧 .video-list-page 保持视觉一致；项目当前固定浅主题，深主题切换再统一改回 var(--n-body-color)。
   */
-  background: #f5f6f8;
+  background: var(--admin-bg, #f5f9f5);
   color: var(--n-text-color-2);
 }
 
@@ -736,7 +779,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 2px;
   background: var(--n-card-color);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 6px 8px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
@@ -760,4 +803,19 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: center;
 }
+
+.media-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; padding: 12px 16px; background: var(--n-card-color, #fff); border: 1px solid var(--n-border-color, #e0e9e1); border-radius: 14px; }
+.media-toolbar__count { color: var(--n-text-color-3); font-size: 13px; }
+.media-toolbar__actions { display: flex; gap: 8px; margin-left: auto; }
+.grid-wrap, .list-wrap { animation: media-appear .24s ease both; }
+@keyframes media-appear { from { opacity: .5; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 640px) {
+  .page-body { padding: 12px 12px 150px; }
+  .needs-attention-alert { margin: 12px; }
+  .grid-wrap, .density-compact .grid-wrap, .density-spacious .grid-wrap { grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 10px; }
+  .media-toolbar { gap: 10px; padding: 12px; }
+  .media-toolbar__actions { width: 100%; justify-content: flex-end; }
+  .pagination-wrap { overflow-x: auto; justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .grid-wrap, .list-wrap { animation: none; } }
 </style>

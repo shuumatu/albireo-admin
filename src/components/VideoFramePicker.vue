@@ -35,6 +35,7 @@
     <div class="controls">
       <input
         type="range"
+        aria-label="选择视频截图时间"
         min="0"
         :max="duration || 0"
         step="0.01"
@@ -49,11 +50,11 @@
     </div>
 
     <div v-if="thumbnail" class="preview">
-      <div class="preview__title">封面预览</div>
-      <img :src="thumbnail" alt="封面预览" />
+      <div class="preview__title">截图预览</div>
+      <img :src="thumbnail" alt="视频截图预览" />
       <n-flex :size="6" justify="flex-end" style="margin-top: 6px;">
         <n-button size="tiny" tertiary @click="thumbnail = ''">放弃</n-button>
-        <n-button size="tiny" type="primary" @click="emitConfirm">使用此帧</n-button>
+        <n-button size="tiny" type="primary" @click="emitConfirm">{{ confirmLabel || '使用此帧' }}</n-button>
       </n-flex>
     </div>
   </div>
@@ -64,6 +65,7 @@ import { computed, ref } from 'vue'
 import { NButton, NFlex } from 'naive-ui'
 
 const props = defineProps<{
+  confirmLabel?: string
   /**
    * 候选视频源（按推荐顺序）。比如 [720p.mp4, 480p.mp4, original.mp4]。
    * 当前 src 加载失败时自动尝试下一条，直到走完。
@@ -227,6 +229,7 @@ function formatT(sec: number): string {
 }
 .controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

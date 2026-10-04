@@ -7,13 +7,13 @@
       <h2 class="upload-page-header__title">素材上传</h2>
     </div>
     <p class="upload-page-header__subtitle">
-      支持图片与视频，最大单文件 5GB，可批量上传 / 暂停 / 断点续传 / 秒传
+      支持图片与视频，建议单文件不超过 5GB，可批量上传 / 暂停 / 断点续传 / 秒传
     </p>
     <n-flex size="small" class="upload-page-header__tags">
-      <n-tag size="small" :bordered="false" type="info">image/*</n-tag>
-      <n-tag size="small" :bordered="false" type="info">video/*</n-tag>
-      <n-tag size="small" :bordered="false" type="success">SHA-256 秒传</n-tag>
-      <n-tag size="small" :bordered="false">分片并发</n-tag>
+      <n-tag size="small" :bordered="false" type="info">图片</n-tag>
+      <n-tag size="small" :bordered="false" type="info">视频</n-tag>
+      <n-tag size="small" :bordered="false" type="success">重复文件秒传</n-tag>
+      <n-tag size="small" :bordered="false">多任务上传</n-tag>
       <n-tag size="small" :bordered="false">断点续传</n-tag>
       <n-tag size="small" :bordered="false">EXIF 提取</n-tag>
     </n-flex>
@@ -38,8 +38,8 @@ import { CloudUploadOutline as CloudUploadIcon } from '@vicons/ionicons5'
 }
 .upload-page-header__title {
   margin: 0;
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 700;
   color: var(--n-text-color);
 }
 .upload-page-header__subtitle {

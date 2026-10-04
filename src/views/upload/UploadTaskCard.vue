@@ -78,13 +78,13 @@
         </template>
       </div>
 
-      <div v-if="task.errorMessage" class="upload-card__error">
+      <div v-if="task.errorMessage" class="upload-card__error" role="alert">
         {{ task.errorMessage }}
       </div>
 
       <div v-if="task.isStale" class="upload-card__stale">
         <n-icon><InformationCircleIcon /></n-icon>
-        <span>页面刷新后该任务的文件已丢失，请重新选择同名同大小的文件以继续</span>
+        <span>请重新选择原文件继续上传，已经完成的分片会自动保留</span>
         <n-button size="tiny" type="primary" @click="onPickResume">重新选择</n-button>
         <input
           ref="resumeInputRef"
@@ -336,12 +336,12 @@ function onResumeFile(e: Event) {
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--n-border-color);
-  border-radius: 10px;
-  background: var(--n-color);
+  border-radius: 14px;
+  background: var(--n-card-color, #fff);
   transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 .upload-card:hover {
-  border-color: var(--n-color-target, #2080f0);
+  border-color: var(--n-primary-color, var(--admin-accent, #2f7b5b));
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
 }
 .upload-card--success { border-color: rgba(24, 160, 88, 0.45); }
@@ -458,4 +458,5 @@ function onResumeFile(e: Event) {
     max-width: 160px;
   }
 }
+@media (prefers-reduced-motion: reduce) { .upload-card { transition: none; } }
 </style>

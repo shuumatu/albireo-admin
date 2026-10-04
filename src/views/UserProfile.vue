@@ -1,8 +1,9 @@
 <template>
-  <div class="profile-container">
-    <n-grid :cols="24" :x-gap="24">
+  <div class="profile-container admin-page">
+    <header class="admin-page-header"><div><h1>个人设置</h1><p>管理账户信息与登录密码。</p></div></header>
+    <n-grid cols="1 900:3" responsive="screen" :x-gap="24" :y-gap="20">
       <!-- 用户信息卡片 -->
-      <n-gi :span="8">
+      <n-gi>
         <n-card title="账户信息">
           <div class="user-info">
             <n-avatar :size="72" round class="user-avatar">
@@ -28,16 +29,18 @@
       </n-gi>
 
       <!-- 修改密码卡片 -->
-      <n-gi :span="16">
+      <n-gi span="1 900:2">
         <n-card title="修改密码">
+          <n-alert type="info" :bordered="false" style="margin-bottom: 24px">修改成功后需要重新登录。新密码长度为 6–64 位。</n-alert>
           <n-form
             ref="formRef"
             :model="formData"
             :rules="rules"
-            label-placement="left"
+            label-placement="top"
             label-width="100"
             require-mark-placement="right-hanging"
             style="max-width: 480px"
+            @keyup.enter="handleChangePassword"
           >
             <n-form-item label="当前密码" path="oldPassword">
               <n-input
@@ -45,6 +48,7 @@
                 type="password"
                 show-password-on="click"
                 placeholder="请输入当前密码"
+                :input-props="{ autocomplete: 'current-password' }"
               />
             </n-form-item>
 
@@ -54,6 +58,7 @@
                 type="password"
                 show-password-on="click"
                 placeholder="请输入新密码（6-64 位）"
+                :input-props="{ autocomplete: 'new-password' }"
               />
             </n-form-item>
 
@@ -63,6 +68,7 @@
                 type="password"
                 show-password-on="click"
                 placeholder="请再次输入新密码"
+                :input-props="{ autocomplete: 'new-password' }"
               />
             </n-form-item>
 
@@ -84,12 +90,15 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMessage, type FormInst, type FormRules } from 'naive-ui'
 import { changePassword } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
+import { clearCredential } from '../utils/credentialCrypto'
 
 const message = useMessage()
 const authStore = useAuthStore()
+const router = useRouter()
 const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
 
@@ -122,9 +131,12 @@ const rules: FormRules = {
 }
 
 async function handleChangePassword() {
+  if (loading.value) return
+  loading.value = true
   try {
     await formRef.value?.validate()
   } catch {
+    loading.value = false
     return
   }
 
@@ -136,7 +148,8 @@ async function handleChangePassword() {
     formData.newPassword = ''
     formData.confirmPassword = ''
     authStore.logout()
-    window.location.href = '/login'
+    clearCredential()
+    router.replace('/login')
   } catch (err: any) {
     const status = err.response?.status
     const msg = err.response?.data
@@ -168,8 +181,8 @@ async function handleChangePassword() {
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, #302b63, #24243e);
-  color: #fff;
+  background: linear-gradient(135deg, #e6f3e9, #c9e3c2);
+  color: var(--admin-accent, #2f7b5b);
   font-size: 28px;
   font-weight: 600;
 }

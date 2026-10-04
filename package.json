@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
     "@coleqiu/vue-drag-select": "^2.0.6-beta.1",
@@ -23,7 +24,8 @@
     "pinia": "^3.0.3",
     "pinia-plugin-persistedstate": "^4.5.0",
     "video.js": "^8.23.4",
-    "vue": "^3.5.17"
+    "vue": "^3.5.17",
+    "vue-router": "4.5.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.0",

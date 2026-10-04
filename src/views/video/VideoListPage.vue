@@ -44,7 +44,15 @@
 
     <!-- 主内容 -->
     <div class="page-body" :class="`density-${state.density}`">
-      <n-spin :show="loading">
+      <div class="media-toolbar">
+        <n-checkbox :checked="allCurrentSelected" :indeterminate="someCurrentSelected && !allCurrentSelected" :disabled="loading || videoList.length === 0" @update:checked="onToggleAllPage">全选本页</n-checkbox>
+        <span class="media-toolbar__count" aria-live="polite">共 {{ total }} 个视频<template v-if="selection.hasSelection.value"> · 已选 {{ selection.selectedCount.value }} 项</template></span>
+        <div class="media-toolbar__actions">
+          <n-button :loading="loading" @click="loadVideoList">刷新</n-button>
+          <n-button type="primary" @click="goUpload">上传视频</n-button>
+        </div>
+      </div>
+      <n-spin :show="loading" description="正在加载视频…">
         <!-- 网格视图 -->
         <div v-if="state.viewMode === 'grid'">
           <drag-select
@@ -53,7 +61,7 @@
             :clickOptionToSelect="false"
             :toggleKey="['ctrlKey', 'metaKey']"
             :rangeKey="['shiftKey']"
-            background="rgba(60, 213, 111, 0.1)"
+            background="rgba(47, 123, 91, 0.12)"
             @change="onDragSelectChange"
           >
             <div class="grid-wrap">
@@ -111,7 +119,7 @@
         </div>
 
         <!-- 空状态 -->
-        <div v-if="!loading && videoList.length === 0" class="empty-wrap">
+        <div v-if="!loading && !loadError && videoList.length === 0" class="empty-wrap">
           <n-empty
             :description="hasAnyFilter ? '没有匹配的视频' : '还没有上传过视频'"
           >
@@ -140,11 +148,13 @@
       </n-spin>
 
       <!-- 分页 -->
-      <div v-if="total > 0" class="pagination-wrap">
+      <div v-if="total > 0" class="pagination-wrap admin-pagination">
         <n-pagination
           v-model:page="paginationPage"
           :page-size="state.pageSize"
           :item-count="total"
+          :page-slot="5"
+          :disabled="loading"
           show-size-picker
           :page-sizes="[20, 40, 60, 100]"
           @update:page-size="(s: number) => query.setFilter({ pageSize: s })"
@@ -156,6 +166,7 @@
     <VideoFloatingActionBar
       :selected-count="selection.selectedCount.value"
       :cross-page-count="selection.crossPageSelectedCount.value"
+      :busy="batchBusy"
       :collections="allCollections"
       @add-to-collections="onBatchAddToCollections"
       @change-visibility="onBatchChangeVisibility"
@@ -170,6 +181,8 @@
       :collections="allCollections"
       :has-prev="drawerHasPrev"
       :has-next="drawerHasNext"
+      :initial-tab="drawerInitialTab"
+      :collections-saving="!!drawerVideo && drawerCollectionsPending.has(drawerVideo.id)"
       @navigate="onDrawerNavigate"
       @open-public="onDrawerOpenPublic"
       @delete="onDrawerDelete"
@@ -208,6 +221,7 @@ import {
   NFlex,
   NCheckbox,
   useMessage,
+  useDialog,
 } from 'naive-ui'
 import { useVideoThemeVars } from './composables/useVideoThemeVars'
 import VideoFilterBar from './VideoFilterBar.vue'
@@ -229,10 +243,12 @@ import {
   updateVideo,
 } from '../../api/manager'
 import type { VideoItem } from '../../api/manager'
-import { fetchProcessingTasks } from '../../api/task'
+import { fetchProcessingTasks, retryAiAnalyze } from '../../api/task'
+import { retryReprocess } from '../../api/reprocess'
 import { useCollectionStore } from '../../stores/collection'
 
 const message = useMessage()
+const dialog = useDialog()
 const router = useRouter()
 const collectionStore = useCollectionStore()
 
@@ -248,13 +264,18 @@ const videoList = ref<VideoItem[]>([])
 const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
+const batchBusy = ref(false)
+let listRequest = 0
 const allCollections = ref<{ id: number; name: string }[]>([])
 
 // ---------- 任务进度（每 5s 拉一次）----------
 const progressByHash = ref<Record<string, { status: string; progress?: number | null }>>({})
 let progressTimer: number | null = null
+let progressRefreshing = false
 
 async function refreshProgress() {
+  if (progressRefreshing || document.hidden) return
+  progressRefreshing = true
   try {
     const list = await fetchProcessingTasks()
     const map: Record<string, { status: string; progress?: number | null }> = {}
@@ -264,6 +285,7 @@ async function refreshProgress() {
     }
     progressByHash.value = map
   } catch (_) { /* 忽略，定时器下个 tick 重试 */ }
+  finally { progressRefreshing = false }
 }
 
 /**
@@ -291,7 +313,7 @@ const failedCount = computed(() =>
 )
 const dismissedFailedAlert = ref(false)
 function filterFailedOnly() {
-  query.setFilter({ status: 'failed' })
+  query.setFilter({ status: videoList.value.find((v) => ['failed', 'ai_analyze_failed', 'transcode_failed'].includes(v.status ?? ''))?.status ?? 'failed' })
   dismissedFailedAlert.value = false
 }
 
@@ -343,6 +365,7 @@ watch(dragSelectedIds, (ids) => {
 
 // ---------- 数据加载 ----------
 async function loadVideoList() {
+  const requestId = ++listRequest
   loading.value = true
   loadError.value = ''
   try {
@@ -358,17 +381,25 @@ async function loadVideoList() {
       order: state.value.order,
     }
     const resp = (await fetchVideoList(params)) as unknown as { total: number; data: VideoItem[] }
+    if (requestId !== listRequest) return
+    const lastPage = Math.max(1, Math.ceil((resp.total ?? 0) / state.value.pageSize))
+    if (state.value.page > lastPage) {
+      query.setFilter({ page: lastPage }, false)
+      return
+    }
     videoList.value = resp.data ?? []
     total.value = resp.total ?? 0
     selection.setCurrentPage(videoList.value)
     // 同步 collection store（兼容侧边栏 / 其它页面）
     collectionStore.setCollection(state.value.collectionId)
   } catch (err: any) {
+    if (requestId !== listRequest) return
     loadError.value = err?.message ?? '未知错误'
     videoList.value = []
+    selection.setCurrentPage([])
     total.value = 0
   } finally {
-    loading.value = false
+    if (requestId === listRequest) loading.value = false
   }
 }
 
@@ -415,7 +446,7 @@ function clearPendingClick() {
   }
 }
 function onVideoClick(video: VideoItem, ev: MouseEvent) {
-  if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+  if (selection.hasSelection.value || ev.ctrlKey || ev.metaKey || ev.shiftKey) {
     selection.handleClick(video.id, {
       ctrlKey: ev.ctrlKey,
       metaKey: ev.metaKey,
@@ -454,8 +485,7 @@ function onCardMenu(video: VideoItem, action: string) {
     case 'edit': openDrawer(video); break
     case 'open-public': openPublic(video); break
     case 'set-cover':
-      openDrawer(video)
-      // TODO: 抽屉打开后定位到封面 tab
+      openDrawer(video, 'cover')
       break
     case 'copy-key':
       copyKey(video)
@@ -485,7 +515,7 @@ function openShareDialog(video: VideoItem) {
 
 function openPublic(video: VideoItem) {
   const origin = getPublicSiteOrigin()
-  window.open(`${origin}/video/${video.uuid}`, '_blank')
+  window.open(`${origin}/video/${video.uuid}`, '_blank', 'noopener,noreferrer')
 }
 
 async function copyKey(video: VideoItem) {
@@ -497,34 +527,68 @@ async function copyKey(video: VideoItem) {
   }
 }
 
-async function confirmDeleteOne(video: VideoItem) {
-  if (!window.confirm(`确定删除「${video.title || video.fileName}」？此操作不可恢复。`)) return
-  try {
-    await deleteVideos([video.id])
-    message.success('已删除')
-    selection.removeFromSelection([video.id])
-    if (drawerVideo.value?.id === video.id) drawerShow.value = false
-    await loadVideoList()
-  } catch (err: any) {
-    message.error(`删除失败：${err?.message ?? '未知错误'}`)
-  }
+function confirmDeleteOne(video: VideoItem) {
+  dialog.warning({
+    title: '删除视频',
+    content: `确定删除「${video.title || video.fileName}」？此操作不可恢复。`,
+    positiveText: '删除', negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await deleteVideos([video.id])
+        message.success('已删除')
+        selection.removeFromSelection([video.id])
+        if (drawerVideo.value?.id === video.id) drawerShow.value = false
+        await loadVideoList()
+      } catch (err: any) {
+        message.error(`删除失败：${err?.message ?? '未知错误'}`)
+        return false
+      }
+    },
+  })
 }
 
-async function onRetry(_video: VideoItem) {
-  // TODO: 调用 retry-ai-analyze 或其它重试入口（依赖具体失败状态）
-  message.info('重试已发送（待接入对应后端接口）')
+const retryingIds = new Set<number>()
+async function onRetry(video: VideoItem) {
+  if (retryingIds.has(video.id)) return
+  if (video.status === 'failed') {
+    message.info('上传失败，请在上传页面重新选择原文件')
+    router.push('/upload')
+    return
+  }
+  const hash = extractHash(video)
+  if (!hash) {
+    router.push(video.status === 'ai_analyze_failed' ? '/manager/task-progress' : '/manager/reprocess')
+    return
+  }
+  retryingIds.add(video.id)
+  try {
+    if (video.status === 'ai_analyze_failed') await retryAiAnalyze(hash)
+    else {
+      const result = await retryReprocess('video', hash)
+      if (!result.ok) throw new Error(result.error || '提交重试失败')
+    }
+    message.success('已提交重新处理任务')
+    await loadVideoList()
+  } catch (err: any) {
+    message.error(err?.message || '重试失败，请稍后再试')
+  } finally {
+    retryingIds.delete(video.id)
+  }
 }
 
 // ---------- 抽屉编辑 ----------
 const drawerShow = ref(false)
 const drawerVideo = ref<VideoItem | null>(null)
+const drawerInitialTab = ref<'location' | 'cover'>('location')
+const drawerCollectionsPending = ref(new Set<number>())
 const drawerIndex = computed(() =>
   drawerVideo.value ? videoList.value.findIndex((v) => v.id === drawerVideo.value!.id) : -1
 )
 const drawerHasPrev = computed(() => drawerIndex.value > 0)
 const drawerHasNext = computed(() => drawerIndex.value >= 0 && drawerIndex.value < videoList.value.length - 1)
 
-function openDrawer(video: VideoItem) {
+function openDrawer(video: VideoItem, initialTab: 'location' | 'cover' = 'location') {
+  drawerInitialTab.value = initialTab
   drawerVideo.value = video
   drawerShow.value = true
 }
@@ -551,26 +615,32 @@ function onDrawerPatched(videoId: number, patch: Partial<VideoItem>) {
   }
 }
 async function onDrawerCollectionsChanged(videoId: number, collectionIds: number[]) {
-  if (!drawerVideo.value || drawerVideo.value.id !== videoId) return
+  if (!drawerVideo.value || drawerVideo.value.id !== videoId || drawerCollectionsPending.value.has(videoId)) return
   const before = new Set((drawerVideo.value.collections ?? []).map((c) => c.id))
   const after = new Set(collectionIds)
   const toAdd = collectionIds.filter((id) => !before.has(id))
   const toRemove = (drawerVideo.value.collections ?? []).filter((c) => !after.has(c.id)).map((c) => c.id)
+  const savedIds = new Set(before)
+  drawerCollectionsPending.value.add(videoId)
   try {
     if (toAdd.length > 0) {
       await addVideosToCollections({ videoIds: [videoId], collectionIds: toAdd })
+      toAdd.forEach(id => savedIds.add(id))
     }
     if (toRemove.length > 0) {
       await removeVideosFromCollections({ videoIds: [videoId], collectionIds: toRemove })
+      toRemove.forEach(id => savedIds.delete(id))
     }
-    // 本地 patch collections 字段（取 allCollections 名称做近似）
-    const newCollections = collectionIds.map((id) => {
+  } catch (err: any) {
+    message.error(`合集更新失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    // 保留已成功完成的操作，失败部分回到原选择。
+    const newCollections = [...savedIds].map((id) => {
       const c = allCollections.value.find((x) => x.id === id)
       return { id, name: c?.name ?? `#${id}`, description: '' }
     })
     onDrawerPatched(videoId, { collections: newCollections })
-  } catch (err: any) {
-    message.error(`合集更新失败：${err?.message ?? '未知错误'}`)
+    drawerCollectionsPending.value.delete(videoId)
   }
 }
 
@@ -593,40 +663,40 @@ function onPreviewClose() {
 async function onBatchAddToCollections(collectionIds: number[]) {
   if (collectionIds.length === 0) return
   const ids = selection.selectedArray.value
-  if (ids.length === 0) return
+  if (ids.length === 0 || batchBusy.value) return
+  batchBusy.value = true
   try {
     await addVideosToCollections({ videoIds: ids, collectionIds })
     message.success(`已加入 ${collectionIds.length} 个合集`)
     await loadVideoList()
   } catch (err: any) {
     message.error(`加合集失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    batchBusy.value = false
   }
 }
 
 async function onBatchChangeVisibility(visibility: string) {
   const ids = selection.selectedArray.value
-  if (ids.length === 0) return
+  if (ids.length === 0 || batchBusy.value) return
+  batchBusy.value = true
   try {
-    await Promise.all(
-      ids.map((id) =>
-        updateVideo(id, {
-          title: '',
-          description: '',
-          shotAt: null,
-          visibility,
-        }).catch((e) => e)
-      )
-    )
-    message.success(`已批量设置可见性为 ${visibility}`)
+    const results = await Promise.allSettled(ids.map((id) => updateVideo(id, { visibility })))
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed) message.warning(`已更新 ${ids.length - failed} 项，${failed} 项失败，可重新尝试`)
+    else message.success(`已将 ${ids.length} 个视频设为${visibility === 'public' ? '公开' : '私密'}`)
     await loadVideoList()
   } catch (err: any) {
     message.error(`批量改可见性失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    batchBusy.value = false
   }
 }
 
 async function onBatchDelete() {
   const ids = selection.selectedArray.value
-  if (ids.length === 0) return
+  if (ids.length === 0 || batchBusy.value) return
+  batchBusy.value = true
   try {
     await deleteVideos(ids)
     message.success(`已删除 ${ids.length} 个视频`)
@@ -634,7 +704,19 @@ async function onBatchDelete() {
     await loadVideoList()
   } catch (err: any) {
     message.error(`批量删除失败：${err?.message ?? '未知错误'}`)
+  } finally {
+    batchBusy.value = false
   }
+}
+
+function confirmKeyboardDelete() {
+  if (batchBusy.value) return
+  dialog.warning({
+    title: '确认批量操作',
+    content:  `确定删除已选 ${selection.selectedCount.value} 项？此操作不可恢复。`,
+    positiveText: '确认', negativeText: '取消',
+    onPositiveClick: () => onBatchDelete(),
+  })
 }
 
 function goUpload() {
@@ -645,7 +727,7 @@ function goUpload() {
 function onGlobalKey(ev: KeyboardEvent) {
   // 在 input / textarea 输入时不触发（除了 / 和 Esc）
   const tag = (ev.target as HTMLElement)?.tagName
-  const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (ev.target as HTMLElement)?.isContentEditable
+  const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ev.target as HTMLElement)?.isContentEditable
 
   if (ev.key === '/' && !inEditable) {
     ev.preventDefault()
@@ -663,7 +745,7 @@ function onGlobalKey(ev: KeyboardEvent) {
     }
     return
   }
-  if (inEditable) return
+  if (inEditable || ev.isComposing || ev.ctrlKey || ev.metaKey || ev.altKey || document.querySelector('.n-dialog, .n-modal, [role="listbox"]')) return
 
   if (ev.key === 'a' && !ev.ctrlKey && !ev.metaKey) {
     ev.preventDefault()
@@ -683,7 +765,7 @@ function onGlobalKey(ev: KeyboardEvent) {
     return
   }
   if (ev.key === 'Delete' && selection.hasSelection.value) {
-    onBatchDelete()
+    confirmKeyboardDelete()
     return
   }
   // 抽屉打开时按 ↑/↓ 切换
@@ -706,6 +788,7 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKey)
 })
 onBeforeUnmount(() => {
+  listRequest++
   if (progressTimer) {
     window.clearInterval(progressTimer)
     progressTimer = null
@@ -726,7 +809,7 @@ onBeforeUnmount(() => {
     项目当前固定浅主题（n-config-provider 没传 theme prop），不为了未来
     可能的深主题切换提前做媒体查询——那时再统一切回 var(--n-body-color)。
   */
-  background: #f5f6f8;
+  background: var(--admin-bg, #f5f9f5);
   color: var(--n-text-color-2);
 }
 
@@ -769,7 +852,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 2px;
   background: var(--n-card-color);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 6px 8px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
@@ -793,4 +876,19 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: center;
 }
+
+.media-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; padding: 12px 16px; background: var(--n-card-color, #fff); border: 1px solid var(--n-border-color, #e0e9e1); border-radius: 14px; }
+.media-toolbar__count { color: var(--n-text-color-3); font-size: 13px; }
+.media-toolbar__actions { display: flex; gap: 8px; margin-left: auto; }
+.grid-wrap, .list-wrap { animation: media-appear .24s ease both; }
+@keyframes media-appear { from { opacity: .5; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 640px) {
+  .page-body { padding: 12px 12px 150px; }
+  .needs-attention-alert { margin: 12px; }
+  .grid-wrap, .density-compact .grid-wrap, .density-spacious .grid-wrap { grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 10px; }
+  .media-toolbar { gap: 10px; padding: 12px; }
+  .media-toolbar__actions { width: 100%; justify-content: flex-end; }
+  .pagination-wrap { overflow-x: auto; justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .grid-wrap, .list-wrap { animation: none; } }
 </style>
