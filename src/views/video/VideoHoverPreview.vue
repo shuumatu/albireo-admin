@@ -50,7 +50,7 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const title = computed(() => props.video?.title || props.video?.fileName || '')
 const duration = computed(() => formatDuration(props.video?.durationMs))
 const streamUrl = computed(() =>
-  props.video?.videoVersions?.find(v => v.status === 'done' && v.resolution === '480p')?.url || props.video?.sourceUrl || ''
+  props.video?.analysisUrl || props.video?.videoVersions?.find(v => v.status === 'done' && v.resolution === '480p')?.url || props.video?.sourceUrl || ''
 )
 
 /**

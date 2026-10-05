@@ -82,7 +82,7 @@
       <div v-if="video" class="drawer-body">
         <!-- 顶部：缩略图 + 行内标题输入 -->
         <div class="drawer-cover">
-          <img v-if="video.coverUrl" :src="video.coverUrl" :alt="video.fileName" />
+          <MediaImage :renditions="video?.renditions" v-if="video.coverUrl" :src="video.coverUrl" :alt="video.fileName" />
           <div v-else class="drawer-cover__placeholder">无封面</div>
         </div>
 
@@ -228,6 +228,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../../components/MediaImage.vue'
+
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import {
   NDrawer,
@@ -344,6 +346,7 @@ watch(() => [props.video?.collections, props.collectionsSaving] as const, () => 
 
 // 只使用后端登记并授权的播放地址。
 const streamCandidates = computed(() => [
+  ...(props.video?.analysisUrl ? [props.video.analysisUrl] : []),
   ...(props.video?.videoVersions ?? []).filter(v => v.status === 'done' && v.url).map(v => v.url!),
   ...(props.video?.sourceUrl ? [props.video.sourceUrl] : []),
 ])
@@ -658,7 +661,7 @@ async function onLocationSave() {
   background: #0e0e12;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
-.drawer-cover img {
+.drawer-cover :deep(img) {
   width: 100%;
   height: 100%;
   object-fit: cover;

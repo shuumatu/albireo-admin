@@ -84,7 +84,7 @@
         >
           <!-- 封面 -->
           <div class="card-cover">
-            <img
+            <MediaImage :renditions="item.renditions"
               v-if="item.coverUrl"
               :src="item.coverUrl"
               :alt="item.name"
@@ -212,6 +212,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../components/MediaImage.vue'
+
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
@@ -463,7 +465,7 @@ onMounted(() => {
   background-color: #f0f0f0;
 }
 
-.cover-img {
+:deep(.cover-img) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -471,7 +473,7 @@ onMounted(() => {
   transition: transform 0.3s ease;
 }
 
-.collection-card:hover .cover-img {
+.collection-card:hover :deep(.cover-img) {
   transform: scale(1.04);
 }
 
@@ -575,5 +577,5 @@ onMounted(() => {
 }
 .collection-card:focus-visible { outline: 3px solid var(--admin-accent, #2f7b5b); outline-offset: 3px; }
 @media (max-width: 640px) { .page-header { align-items: flex-start; gap: 16px; flex-direction: column; }.grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }.toolbar-right { width: 100%; margin-left: 0; }.pagination-wrapper { justify-content: flex-start; overflow-x: auto; } }
-@media (prefers-reduced-motion: reduce) { .collection-card, .cover-img, .card-overlay { transition: none; }.collection-card:hover, .collection-card:hover .cover-img { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .collection-card, .cover-img, .card-overlay { transition: none; }.collection-card:hover, .collection-card:hover :deep(.cover-img) { transform: none; } }
 </style>

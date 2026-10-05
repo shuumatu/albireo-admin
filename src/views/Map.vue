@@ -11,6 +11,8 @@
   </section>
 </template>
 <script setup lang="ts">
+import { imageForSize } from '../utils/mediaQuality'
+
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -29,7 +31,7 @@ function clearMarkers() { markers.forEach(marker => marker.remove()); markers = 
 function createPointPopup(point: MapPoint, index?: number) {
   const content = document.createElement('div')
   content.className = 'media-map-popup'
-  if (point.thumbnailUrl) { const image = document.createElement('img'); image.src = point.thumbnailUrl; image.alt = point.mediaType === 'image' ? '图片缩略图' : '视频封面'; image.addEventListener('error', () => image.remove(), { once: true }); content.append(image) }
+  if (point.thumbnailUrl) { const image = document.createElement('img'); image.src = imageForSize(point.renditions, point.thumbnailUrl, 240, 160, 'cover', window.devicePixelRatio); image.alt = point.mediaType === 'image' ? '图片缩略图' : '视频封面'; image.addEventListener('error', () => image.remove(), { once: true }); content.append(image) }
   const title = document.createElement('strong')
   title.textContent = `${index == null ? '' : `${index + 1}. `}${point.mediaType === 'image' ? '图片素材' : '视频素材'}`
   const link = document.createElement('a')

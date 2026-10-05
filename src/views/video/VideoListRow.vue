@@ -19,7 +19,7 @@
 
     <!-- 缩略图 + 时长 / 分辨率徽标 -->
     <div class="row-thumb">
-      <img
+      <MediaImage :renditions="video?.renditions"
         v-if="video.coverUrl && !coverFailed"
         :src="video.coverUrl"
         :alt="title"
@@ -114,6 +114,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../../components/MediaImage.vue'
+
 import { computed, h, ref, watch } from 'vue'
 import { NCheckbox, NButton, NDropdown, NTag } from 'naive-ui'
 import VideoStatusOverlay from './VideoStatusOverlay.vue'
@@ -243,7 +245,7 @@ function onRowDblClick() {
   background: #0e0e12;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
-.row-thumb img {
+.row-thumb :deep(img) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -353,5 +355,5 @@ function onRowDblClick() {
 
 .video-row:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
 @media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
-@media (prefers-reduced-motion: reduce) { .video-row, .cover-img { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .video-row, :deep(.cover-img) { transition: none; } }
 </style>

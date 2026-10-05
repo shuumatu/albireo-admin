@@ -19,7 +19,7 @@
 
     <!-- 缩略图 + 状态遮罩 -->
     <div class="row-thumb">
-      <img
+      <MediaImage :renditions="image?.renditions"
         v-if="!coverFailed && cover"
         :src="cover"
         :alt="title"
@@ -117,6 +117,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../../components/MediaImage.vue'
+
 import { computed, h, ref } from 'vue'
 import { NCheckbox, NButton, NDropdown, NTag } from 'naive-ui'
 import ImageStatusOverlay from './ImageStatusOverlay.vue'
@@ -254,7 +256,7 @@ function onRowDblClick() {
   background: #0e0e12;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
-.row-thumb img {
+.row-thumb :deep(img) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -358,5 +360,5 @@ function onRowDblClick() {
 
 .image-row:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
 @media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
-@media (prefers-reduced-motion: reduce) { .image-row, .cover-img { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .image-row, :deep(.cover-img) { transition: none; } }
 </style>

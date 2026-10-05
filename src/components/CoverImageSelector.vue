@@ -44,12 +44,9 @@
             >
               <n-flex vertical>
                 <n-flex justify="center">
-                  <n-image
+                  <MediaImage :renditions="img.renditions"
                     :src="img.mediumUrl || img.thumbnailUrl || img.imageUrl"
-                    width="100%"
-                    height="150px"
-                    object-fit="cover"
-                    preview-disabled
+                    style="width: 100%; height: 150px"
                     :alt="img.title || img.fileName"
                   />
                 </n-flex>
@@ -97,6 +94,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from './MediaImage.vue'
+
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { fetchImages, fetchImagesWithCollectionId } from '../api/images'
 import { fetchImageCollectionsIds } from '../api/manager'

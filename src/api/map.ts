@@ -1,6 +1,8 @@
+import type { MediaRendition } from '../types/media'
 import request from '../utils/request'
 
 export interface MapPoint {
+  renditions?: MediaRendition[]
   uuid: string
   mediaType: 'video' | 'image'
   objectKey: string

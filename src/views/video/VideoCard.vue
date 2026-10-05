@@ -16,7 +16,7 @@
   >
     <!-- 16:9 封面区，整张图作背景 -->
     <div class="cover-wrapper" ref="coverWrapper">
-      <img
+      <MediaImage :renditions="video?.renditions"
         v-if="video.coverUrl && !coverFailed"
         :src="video.coverUrl"
         :alt="title"
@@ -127,6 +127,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../../components/MediaImage.vue'
+
 import { computed, ref, h, watch, onBeforeUnmount } from 'vue'
 import { NCheckbox, NDropdown, NTag } from 'naive-ui'
 import VideoStatusOverlay from './VideoStatusOverlay.vue'
@@ -318,7 +320,7 @@ onBeforeUnmount(() => { if (previewTimer) window.clearTimeout(previewTimer) })
   background: #0e0e12;
   overflow: hidden;
 }
-.cover-img {
+:deep(.cover-img) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -503,5 +505,5 @@ onBeforeUnmount(() => { if (previewTimer) window.clearTimeout(previewTimer) })
 
 .video-card:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
 @media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
-@media (prefers-reduced-motion: reduce) { .video-card, .cover-img { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .video-card, :deep(.cover-img) { transition: none; } }
 </style>

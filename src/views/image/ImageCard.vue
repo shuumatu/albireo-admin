@@ -16,7 +16,7 @@
   >
     <!-- 1:1 方形封面区，整张图作背景 -->
     <div class="cover-wrapper" ref="coverWrapper">
-      <img
+      <MediaImage :renditions="image?.renditions"
         v-if="!coverFailed && cover"
         :src="cover"
         :alt="title"
@@ -118,6 +118,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../../components/MediaImage.vue'
+
 import { computed, ref, h } from 'vue'
 import { NCheckbox, NDropdown } from 'naive-ui'
 import ImageStatusOverlay from './ImageStatusOverlay.vue'
@@ -292,7 +294,7 @@ function onMenuSelect(action: string) {
   background: #0e0e12;
   overflow: hidden;
 }
-.cover-img {
+:deep(.cover-img) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -470,5 +472,5 @@ function onMenuSelect(action: string) {
 
 .image-card:focus-visible { outline: 3px solid var(--n-primary-color, var(--admin-accent, #2f7b5b)); outline-offset: 3px; }
 @media (hover: none) { .select-box { opacity: 1; pointer-events: auto; } }
-@media (prefers-reduced-motion: reduce) { .image-card, .cover-img { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .image-card, :deep(.cover-img) { transition: none; } }
 </style>

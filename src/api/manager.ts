@@ -1,3 +1,4 @@
+import type { MediaRendition, VideoPlayback } from '../types/media';
 import request from "../utils/request";
 import { normalizeCollectionPage } from '../utils/collectionPage'
 
@@ -58,6 +59,10 @@ interface CollectionItem {
  * 老数据可能为 null，前端按字段缺失绕过显示，绝不阻塞列表 UI。
  */
 export interface VideoItem {
+  playback?: VideoPlayback
+  posterUrl?: string
+  analysisUrl?: string
+  renditions?: MediaRendition[]
   id: number
   uuid: string
   title: string | null
@@ -98,6 +103,7 @@ interface CollectionResponse {
 }
 
 interface CollectionWithCoverResponse {
+  renditions?: MediaRendition[];
   id: number;
   name: string;
   description: string;
@@ -144,6 +150,7 @@ export function UpdateVideoCollections(params: CollectionParams ) {
 
 
 interface CollectionsManagerResponse {
+    renditions?: MediaRendition[];
     id: number;
     name: string;
     description: string;

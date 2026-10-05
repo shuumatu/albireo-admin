@@ -15,6 +15,7 @@
       </div>
     </header>
     <p class="rp-description">集中恢复处理失败的媒体，保留已经生成的可用版本。</p>
+    <DerivativeMigration />
     <n-alert v-if="loadError" type="error" class="rp-help">{{ loadError }}</n-alert>
 
     <n-alert type="info" :show-icon="false" class="rp-help">
@@ -74,6 +75,7 @@
 </template>
 
 <script setup lang="ts">
+import DerivativeMigration from '../components/DerivativeMigration.vue'
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   NAlert,

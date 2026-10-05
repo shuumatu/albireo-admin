@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 const request = axios.create({
+  withCredentials: true,
   baseURL: '/api/metadata',
   timeout: 10000
 })

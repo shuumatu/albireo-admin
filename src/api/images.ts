@@ -1,3 +1,4 @@
+import type { MediaRendition } from '../types/media';
 import request from "../utils/request";
 
 export type ImageListOrderBy = 'createdAt' | 'updatedAt' | 'shotAt'
@@ -35,6 +36,7 @@ export interface ImageParams {
  * UI 使用前都做容错。
  */
 export interface ImageItem {
+  renditions?: MediaRendition[];
   id: number;
   uuid: string;
   fileName: string;

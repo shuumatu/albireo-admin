@@ -39,7 +39,7 @@
         <div class="cover-frame">
           <n-image
             v-if="collection.imageUrl"
-            :src="collection.imageUrl"
+            :src="imageForSize(collection.renditions, collection.imageUrl, 420, 320, 'cover', 2)"
             object-fit="cover"
             class="cover-img"
             :preview-disabled="false"
@@ -202,7 +202,7 @@
             @keydown.space.prevent="togglePickItem(item)"
           >
             <div class="pick-card__cover">
-              <img
+              <MediaImage :renditions="item.renditions"
                 v-if="getThumb(item)"
                 :src="getThumb(item)!"
                 :alt="getItemTitle(item)"
@@ -273,6 +273,9 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../components/MediaImage.vue'
+import { imageForSize } from '../utils/mediaQuality'
+
 import { ref, computed, onBeforeMount, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
@@ -768,7 +771,7 @@ onBeforeUnmount(() => { itemsRequestId++; imageManagerStore.setCollection(null);
   aspect-ratio: 16 / 10;
 }
 
-.pick-card__img {
+:deep(.pick-card__img) {
   width: 100%;
   height: 100%;
   object-fit: cover;

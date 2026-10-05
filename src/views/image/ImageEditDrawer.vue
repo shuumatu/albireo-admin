@@ -81,7 +81,7 @@
       <div v-if="image" class="drawer-body">
         <!-- 顶部：缩略图 -->
         <div class="drawer-cover">
-          <img v-if="!coverFailed && cover" :src="cover" :alt="image.fileName" @error="coverFailed = true" />
+          <MediaImage fit="contain" :renditions="image?.renditions" v-if="!coverFailed && cover" :src="cover" :alt="image.fileName" @error="coverFailed = true" />
           <div v-else class="drawer-cover__placeholder">无封面</div>
         </div>
 
@@ -225,6 +225,8 @@
 </template>
 
 <script setup lang="ts">
+import MediaImage from '../../components/MediaImage.vue'
+
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import {
   NDrawer,
@@ -661,7 +663,7 @@ async function onExifSave() {
   align-items: center;
   justify-content: center;
 }
-.drawer-cover img {
+.drawer-cover :deep(img) {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
