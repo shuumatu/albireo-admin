@@ -1,5 +1,5 @@
 import { onMounted, onBeforeUnmount, watch } from 'vue'
-import exifr from 'exifr'
+import { extractMetadata } from '../../../utils/mediaMetadata'
 import {
   initiateUpload,
   getParts,
@@ -9,7 +9,6 @@ import {
   getSessionByHash,
   cancelUpload,
   type PartETagDTO,
-  type GpsData,
 } from '../../../api/upload'
 import { useUploadStore, type UploadTask } from '../../../stores/uploadStore'
 import { generateThumbnail } from './thumbnailGenerator'
@@ -108,33 +107,6 @@ function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 9)
 }
 
-function dateToISOWithTZ(date: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, '0')
-  const tzOffset = -date.getTimezoneOffset()
-  const sign = tzOffset >= 0 ? '+' : '-'
-  const tzH = pad(Math.floor(Math.abs(tzOffset) / 60))
-  const tzM = pad(Math.abs(tzOffset) % 60)
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
-    `${sign}${tzH}:${tzM}`
-  )
-}
-
-function convertExifDateToISO(exifDate: string): string | null {
-  if (!exifDate) return null
-  try {
-    const normalized = exifDate
-      .replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')
-      .replace(' ', 'T')
-    const d = new Date(normalized)
-    if (isNaN(d.getTime())) return null
-    return dateToISOWithTZ(d)
-  } catch {
-    return null
-  }
-}
-
 function getFileMimeType(file: File): string {
   if (file.type) return file.type
   const ext = file.name.split('.').pop()?.toLowerCase()
@@ -188,59 +160,6 @@ function createParts(file: File, partSize: number) {
     parts.push({ partNumber: n, start: off, end: Math.min(off + partSize, file.size) })
   }
   return parts
-}
-
-async function extractMetadata(file: File): Promise<{
-  gpsData: GpsData | null
-  dateTime: string
-  dateTimeSource: 'exif' | 'file'
-}> {
-  let gpsData: GpsData | null = null
-  let dateTime: string | null = null
-  let dateTimeSource: 'exif' | 'file' = 'file'
-  try {
-    const meta: any = await exifr.parse(file, {
-      gps: true,
-      pick: [
-        'latitude', 'longitude', 'GPSLatitude', 'GPSLongitude',
-        'altitude', 'GPSAltitude', 'GPSAltitudeRef',
-        'DateTimeOriginal', 'CreateDate', 'CreationDate',
-        'MediaCreateDate', 'TrackCreateDate', 'DateTime',
-      ],
-    })
-    if (meta) {
-      const lat = meta.latitude ?? meta.GPSLatitude
-      const lon = meta.longitude ?? meta.GPSLongitude
-      let alt = meta.altitude ?? meta.GPSAltitude
-      if (alt != null && meta.GPSAltitudeRef === 1) alt = -Math.abs(alt)
-      else if (alt != null) alt = Math.abs(alt)
-      if (lat != null && lon != null) {
-        gpsData = { latitude: lat, longitude: lon, altitude: alt != null ? alt : null }
-      }
-      const raw =
-        meta.DateTimeOriginal ?? meta.CreateDate ?? meta.CreationDate ??
-        meta.MediaCreateDate ?? meta.TrackCreateDate ?? meta.DateTime
-      if (raw) {
-        if (raw instanceof Date) {
-          dateTime = dateToISOWithTZ(raw)
-          dateTimeSource = 'exif'
-        } else if (typeof raw === 'string') {
-          const conv = convertExifDateToISO(raw)
-          if (conv) {
-            dateTime = conv
-            dateTimeSource = 'exif'
-          }
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  if (!dateTime) {
-    dateTime = dateToISOWithTZ(new Date(file.lastModified))
-    dateTimeSource = 'file'
-  }
-  return { gpsData, dateTime, dateTimeSource }
 }
 
 function classifyError(err: unknown): 'retry' | 'fatal' | 'aborted' {

@@ -123,15 +123,34 @@
             <template #unchecked>关闭</template>
           </n-switch>
         </n-form-item-gi>
-        <n-form-item-gi label="拍摄时间">
-          <n-date-picker
-            v-model:value="dateTimeTimestamp"
-            type="datetime"
-            clearable
-            style="width: 100%;"
-          />
+        <n-form-item-gi label="拍摄时间" :span="2">
+          <div style="width: 100%;">
+            <n-date-picker
+              v-model:value="dateTimeTimestamp"
+              type="datetime"
+              clearable
+              style="width: 100%;"
+            />
+            <n-text v-if="form.dateTimeOriginal" depth="3" style="display: block; margin-top: 6px; overflow-wrap: anywhere;">
+              元数据原值：{{ form.dateTimeOriginal }}
+            </n-text>
+            <n-text depth="3" style="display: block; margin-top: 4px;">
+              含时区的时间按当前设备时区显示；无时区的时间保留原值。修改后保存为带时区时间。
+            </n-text>
+          </div>
         </n-form-item-gi>
       </n-grid>
+
+      <details v-if="rawFields.length" class="raw-metadata">
+        <summary>文件原始元数据（{{ rawFields.length }} 项）</summary>
+        <p>保留文件中的原始标签，便于核对拍摄时间、位置和设备信息。上方编辑不会更改这些原始记录。</p>
+        <dl class="raw-metadata__fields">
+          <template v-for="[key, value] in rawFields" :key="key">
+            <dt>{{ key.slice(4) }}</dt>
+            <dd>{{ value }}</dd>
+          </template>
+        </dl>
+      </details>
 
       <n-divider title-placement="left">自定义字段</n-divider>
 
@@ -164,6 +183,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Subtract24Regular as SubtractIcon, Add24Regular as AddIcon } from '@vicons/fluent'
 import type { ExifData } from '../api/exif'
 import { useLensfun } from '../composables/useLensfun'
+import { normalizeCaptureDate } from '../utils/mediaMetadata'
 
 const BUILTIN_KEYS = new Set([
   'cameraMake', 'cameraModel', 'lens', 'aperture', 'shutterSpeed',
@@ -216,6 +236,7 @@ const emit = defineEmits<{
 
 const form = ref<ExifData>({ ...props.modelValue })
 const customFields = ref<{ key: string; val: string }[]>([])
+const rawFields = computed(() => Object.entries(form.value).filter(([key]) => key.startsWith('raw.')))
 let suppressSync = false
 
 const cameraMakeRef = computed(() => form.value.cameraMake)
@@ -305,17 +326,14 @@ const dateTimeTimestamp = computed({
   get(): number | null {
     const str = form.value.dateTimeOriginal
     if (!str) return null
-    let ts = new Date(str).getTime()
-    if (!isNaN(ts)) return ts
-    ts = new Date(str.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')).getTime()
-    return isNaN(ts) ? null : ts
+    const normalized = normalizeCaptureDate(str)
+    if (!normalized) return null
+    const ts = new Date(normalized).getTime()
+    return Number.isFinite(ts) ? ts : null
   },
   set(val: number | null) {
-    if (val) {
-      const d = new Date(val)
-      const pad = (n: number) => String(n).padStart(2, '0')
-      form.value.dateTimeOriginal =
-        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    if (val != null && Number.isFinite(val)) {
+      form.value.dateTimeOriginal = new Date(val).toISOString()
     } else {
       form.value.dateTimeOriginal = undefined
     }
@@ -332,20 +350,23 @@ function addCustomField() {
 
 function extractCustomFields(data: ExifData) {
   return Object.entries(data)
-    .filter(([k]) => !BUILTIN_KEYS.has(k))
+    .filter(([k]) => !BUILTIN_KEYS.has(k) && !k.startsWith('raw.'))
     .map(([key, val]) => ({ key, val: String(val ?? '') }))
 }
 
 function buildExifData(): ExifData {
   const result: ExifData = {}
   for (const [k, v] of Object.entries(form.value)) {
-    if (BUILTIN_KEYS.has(k) && v != null && v !== '') {
+    if ((BUILTIN_KEYS.has(k) || k.startsWith('raw.')) && v != null && v !== '') {
       result[k] = v
     }
   }
   for (const { key, val } of customFields.value) {
     if (key.trim()) {
-      result[key.trim()] = val
+      const name = key.trim()
+      if (BUILTIN_KEYS.has(name) || name.startsWith('raw.')) continue
+      // Preserve the type of untouched numeric/structured metadata when another field is edited.
+      result[name] = Object.prototype.hasOwnProperty.call(form.value, name) && String(form.value[name] ?? '') === val ? form.value[name] : val
     }
   }
   return result
@@ -363,3 +384,32 @@ watch([form, customFields], () => {
   nextTick(() => { suppressSync = false })
 }, { deep: true })
 </script>
+
+<style scoped>
+.raw-metadata {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.raw-metadata summary {
+  cursor: pointer;
+}
+.raw-metadata p {
+  color: var(--n-text-color-disabled);
+  font-size: 12px;
+}
+.raw-metadata__fields {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr);
+  gap: 8px 12px;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 12px;
+}
+.raw-metadata__fields dt {
+  font-weight: 600;
+}
+.raw-metadata__fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+</style>

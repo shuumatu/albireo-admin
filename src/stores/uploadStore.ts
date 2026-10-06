@@ -50,7 +50,7 @@ export interface UploadTask {
    */
   thumbnailDataUrl?: string
   gpsData?: GpsData | null
-  dateTime?: string
+  dateTime?: string | null
   dateTimeSource?: 'exif' | 'file'
 }
 

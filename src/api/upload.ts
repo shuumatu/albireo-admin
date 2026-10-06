@@ -37,9 +37,9 @@ interface InitiateParams {
   fileType: string;
   fileSize: number;
   fileHash: string;
-  dateTime?: string | null;          // ISO 8601 格式的日期时间
+  dateTime?: string | null;          // 仅发送元数据中含明确时区的时间；无时区时由服务端读取原文件
   gpsData?: GpsData | null;
-  dateTimeSource?: 'exif' | 'file';
+  dateTimeSource?: 'exif';
 }
 
 interface InitiateResponse {
