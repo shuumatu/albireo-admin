@@ -12,6 +12,7 @@ import {
 } from '../../../api/upload'
 import { useUploadStore, type UploadTask } from '../../../stores/uploadStore'
 import { generateThumbnail } from './thumbnailGenerator'
+import { verifyResumeIdentity } from '../../../utils/resumeIdentity'
 
 interface Runtime {
   file: File
@@ -54,6 +55,7 @@ const MIN_SPEED_WINDOW_SEC = 0.5
 
 /** 模块级运行时 Map，保证 composable 多次调用共享实例 */
 const runtimeMap = new Map<string, Runtime>()
+const resumeChecks = new Map<string, AbortController>()
 
 /** 简单可变大小的 Semaphore（用于全局分片并发控制） */
 class Semaphore {
@@ -127,27 +129,32 @@ function computeHashWithProgress(
   file: File,
   onProgress: (p: number) => void,
   chunkSize: number = 4 * 1024 * 1024,
+  signal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return }
     const worker = new Worker(
       new URL('../../../workers/fileHashWorker.ts', import.meta.url),
       { type: 'module' },
     )
+    const stop = () => { signal?.removeEventListener('abort', abort); worker.terminate() }
+    const abort = () => { stop(); reject(new DOMException('已取消文件校验', 'AbortError')) }
+    signal?.addEventListener('abort', abort, { once: true })
     worker.onmessage = (e) => {
       const { status, hash, progress, error } = e.data
       if (status === 'progress') {
         onProgress(progress)
       } else if (status === 'done') {
         resolve(hash)
-        worker.terminate()
+        stop()
       } else if (status === 'error') {
         reject(new Error(error))
-        worker.terminate()
+        stop()
       }
     }
     worker.onerror = (err) => {
       reject(err)
-      worker.terminate()
+      stop()
     }
     worker.postMessage({ file, chunkSize })
   })
@@ -380,6 +387,11 @@ export function useUploadQueue() {
   }
 
   function pauseTask(id: string) {
+    if (resumeChecks.has(id)) {
+      resumeChecks.get(id)!.abort()
+      store.updateTask(id, { status: 'need-resume', hashProgress: 0 })
+      return
+    }
     const task = store.tasks.find((t) => t.id === id)
     const rt = runtimeMap.get(id)
     if (!task || !rt) return
@@ -446,6 +458,7 @@ export function useUploadQueue() {
    * 同步置 cancelled 标志、abort 飞行中的 XHR，并通知后端清理 MPU / 孤儿对象 / metadata 占位。
    */
   function removeTask(id: string) {
+    resumeChecks.get(id)?.abort()
     const task = store.tasks.find((t) => t.id === id)
     const rt = runtimeMap.get(id)
 
@@ -922,55 +935,68 @@ export function useUploadQueue() {
   /** 用户在 need-resume 状态下重新选择文件以续传 */
   async function tryAttachAndResume(taskId: string, file: File): Promise<boolean> {
     const task = store.tasks.find((t) => t.id === taskId)
-    if (!task) return false
-    if (file.name !== task.fileName || file.size !== task.fileSize) {
+    if (!task || resumeChecks.has(taskId)) return false
+    const check = new AbortController()
+    resumeChecks.set(taskId, check)
+    let verifiedHash: string
+    try {
+      store.updateTask(taskId, { status: 'hashing', hashProgress: 0, errorMessage: undefined })
+      verifiedHash = await verifyResumeIdentity(file, task, (selected, signal) =>
+        computeHashWithProgress(selected, p => store.updateTask(taskId, { hashProgress: Math.floor(p * 100) }), undefined, signal), check.signal)
+      // 询问后端 session 是否还在
+      let canResume = false
+      if (task.fileHash) {
+        try {
+          const sess = await getSessionByHash(task.fileHash)
+          canResume = sess.status === 'active' || sess.status === 'completed'
+        } catch {
+          /* ignore */
+        }
+      }
+      check.signal.throwIfAborted()
+      if (!store.tasks.some(t => t.id === taskId)) return false
+      const fileType = task.fileType || getFileMimeType(file)
+      runtimeMap.set(taskId, {
+        file,
+        fileType,
+        paused: false,
+        cancelled: false,
+        speedSamples: [],
+        lastDisplayedUploaded: 0,
+        uploadedBytes: 0,
+        totalBytes: file.size,
+        uploadedParts: [],
+        parts: [],
+        partUploadLoaded: new Map(),
+        fileHash: verifiedHash,
+        key: canResume ? task.objectKey : undefined,
+        uploadId: canResume ? task.uploadId : undefined,
+        partSize: canResume ? task.partSize : undefined,
+      })
+      ensureThumbnail(taskId, file, fileType)
       store.updateTask(taskId, {
-        errorMessage: '所选文件与原任务不匹配',
+        status: 'queued',
+        isStale: false,
+        errorMessage: undefined,
+        retryCount: 0,
+        progress: 0,
+        fileHash: verifiedHash,
+        hashProgress: 100,
+        uploadedBytes: 0,
+        speed: 0,
+        eta: null,
+      })
+      void runTask(taskId)
+      return true
+    } catch (error) {
+      if (store.tasks.some(t => t.id === taskId)) store.updateTask(taskId, {
+        status: 'need-resume', hashProgress: 0,
+        errorMessage: check.signal.aborted ? undefined : (error instanceof Error ? error.message : '文件校验失败，请重试'),
       })
       return false
+    } finally {
+      if (resumeChecks.get(taskId) === check) resumeChecks.delete(taskId)
     }
-    // 询问后端 session 是否还在
-    let canResume = false
-    if (task.fileHash) {
-      try {
-        const sess = await getSessionByHash(task.fileHash)
-        canResume = sess.status === 'active' || sess.status === 'completed'
-      } catch {
-        /* ignore */
-      }
-    }
-    const fileType = task.fileType || getFileMimeType(file)
-    runtimeMap.set(taskId, {
-      file,
-      fileType,
-      paused: false,
-      cancelled: false,
-      speedSamples: [],
-      lastDisplayedUploaded: 0,
-      uploadedBytes: 0,
-      totalBytes: file.size,
-      uploadedParts: [],
-      parts: [],
-      partUploadLoaded: new Map(),
-      fileHash: task.fileHash,
-      key: canResume ? task.objectKey : undefined,
-      uploadId: canResume ? task.uploadId : undefined,
-      partSize: canResume ? task.partSize : undefined,
-    })
-    ensureThumbnail(taskId, file, fileType)
-    store.updateTask(taskId, {
-      status: 'queued',
-      isStale: false,
-      errorMessage: undefined,
-      retryCount: 0,
-      progress: 0,
-      hashProgress: task.fileHash ? 100 : 0,
-      uploadedBytes: 0,
-      speed: 0,
-      eta: null,
-    })
-    void runTask(taskId)
-    return true
   }
 
   return {

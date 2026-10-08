@@ -13,11 +13,13 @@
 <script setup lang="ts">
 import { h } from 'vue'
 import { useRouter } from 'vue-router'
-import { NIcon, useDialog } from 'naive-ui'
+import { NIcon, useDialog, useMessage } from 'naive-ui'
 import { SettingsOutline, LogOutOutline, MenuOutline, SearchOutline, PulseOutline, ChevronDownOutline } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth'
+import { logout } from '../api/auth'
 import Breadcrumb from './Breadcrumb.vue'
 defineEmits<{ 'toggle-menu': []; 'open-search': [] }>()
+const message = useMessage()
 const router = useRouter(), dialog = useDialog(), authStore = useAuthStore()
 const userMenuOptions = [
   { label: '个人设置', key: 'profile', icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }) },
@@ -26,7 +28,7 @@ const userMenuOptions = [
 ]
 function handleUserMenuSelect(key: string) {
   if (key === 'profile') router.push('/profile')
-  else if (key === 'logout') dialog.warning({ title: '退出登录', content: '确定退出当前管理账户吗？', positiveText: '退出', negativeText: '取消', onPositiveClick: () => { authStore.logout(); router.push('/login') } })
+  else if (key === 'logout') dialog.warning({ title: '退出登录', content: '确定退出当前管理账户吗？', positiveText: '退出', negativeText: '取消', onPositiveClick: async () => { try { await logout(); authStore.logout(); router.push('/login') } catch { message.error('退出失败，请重试'); return false } } })
 }
 </script>
 <style scoped>

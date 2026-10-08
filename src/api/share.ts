@@ -74,8 +74,8 @@ export function createShare(payload: ShareCreateDTO): Promise<ShareVO> {
   return request.post('/share', payload)
 }
 
-export function getMyShares(page = 1, pageSize = 20): Promise<PageResult<ShareVO>> {
-  return request.get('/share/my', { params: { page, pageSize } })
+export function getMyShares(page = 1, pageSize = 20, filters: {keyword?: string; targetType?: ShareTargetType; status?: ShareStatus} = {}): Promise<PageResult<ShareVO>> {
+  return request.get('/share/my', { params: { page, pageSize, ...filters } })
 }
 
 export function updateShare(id: number, payload: ShareUpdateDTO): Promise<ShareVO> {

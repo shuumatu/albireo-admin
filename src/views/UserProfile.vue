@@ -25,6 +25,7 @@
               </n-descriptions>
             </div>
           </div>
+          <n-button block secondary style="margin-top: 16px" @click="logoutAll">退出全部设备</n-button>
         </n-card>
       </n-gi>
 
@@ -92,10 +93,14 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage, type FormInst, type FormRules } from 'naive-ui'
-import { changePassword } from '../api/auth'
+import { changePassword, logout } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 import { clearCredential } from '../utils/credentialCrypto'
 
+async function logoutAll() {
+  try { await logout(true); authStore.logout(); await router.push('/login') }
+  catch { message.error('退出失败，请重试') }
+}
 const message = useMessage()
 const authStore = useAuthStore()
 const router = useRouter()

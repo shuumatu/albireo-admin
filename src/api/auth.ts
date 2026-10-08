@@ -27,3 +27,8 @@ export function adminLogin(username: string, password: string) {
 export function changePassword(oldPassword: string, newPassword: string) {
   return authRequest.post('/change-password', { oldPassword, newPassword })
 }
+
+export async function logout(all = false): Promise<void> {
+  try { await authRequest.post(all ? "/logout-all" : "/logout") }
+  catch (e: any) { if (e?.response?.status !== 401) throw e }
+}

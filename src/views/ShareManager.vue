@@ -56,11 +56,11 @@
         <n-button v-if="hasFilters" @click="resetFilters">重置筛选</n-button>
         <span style="flex: 1 1 auto;" />
         <n-text depth="3" v-if="!loading">
-          共 {{ totalRaw }} 条{{ hasFilters ? ` · 匹配 ${filteredCount} 条` : '' }}
+          共 {{ totalRaw }} 条{{ hasFilters ? '匹配结果' : '' }}
         </n-text>
       </n-flex>
       <n-alert v-if="loadError" type="error" :bordered="false" class="status-alert">{{ loadError }} <n-button text type="error" @click="fetchShares">重新加载</n-button></n-alert>
-      <n-text v-if="loading && hasFilters" depth="3" class="filter-progress" aria-live="polite">正在检索全部分享{{ loadedCount ? `，已读取 ${loadedCount} 条` : '…' }}</n-text>
+      <n-text v-if="loading && hasFilters" depth="3" class="filter-progress" aria-live="polite">正在检索分享…</n-text>
       <n-data-table
         :columns="columns"
         :data="displayShares"
@@ -210,8 +210,6 @@ const sharePage = ref(1)
 const sharePageSize = ref(20)
 const totalRaw = ref(0)
 const loadError = ref('')
-const loadedCount = ref(0)
-const allShares = ref<ShareVO[] | null>(null)
 const busyIds = ref(new Set<number>())
 let listRequestId = 0
 
@@ -232,79 +230,49 @@ const statusFilterOptions = [
   { label: '已停用', value: 'disabled' }
 ]
 
-// The API only supports pagination. Read pages sequentially when filtering so
-// matches are complete, and discard results superseded by a new request.
 const hasFilters = computed(() => !!(appliedKeyword.value || filterType.value || filterStatus.value))
-const filteredShares = computed(() => {
-  let list = allShares.value ?? []
-  if (filterType.value) list = list.filter(s => s.targetType === filterType.value)
-  if (filterStatus.value) list = list.filter(s => s.status === filterStatus.value)
-  const kw = appliedKeyword.value.toLocaleLowerCase()
-  if (kw) list = list.filter(s => [s.title, s.description, s.shareCode].some(value => (value || '').toLocaleLowerCase().includes(kw)))
-  return list
-})
-const filteredCount = computed(() => filteredShares.value.length)
-const displayShares = computed(() => hasFilters.value
-  ? filteredShares.value.slice((sharePage.value - 1) * sharePageSize.value, sharePage.value * sharePageSize.value)
-  : shareList.value)
+const displayShares = computed(() => shareList.value)
 const pagination = computed(() => ({
   page: sharePage.value, pageSize: sharePageSize.value,
-  itemCount: hasFilters.value ? filteredCount.value : totalRaw.value,
+  itemCount: totalRaw.value,
   showSizePicker: true, pageSizes: [10, 20, 50], pageSlot: 5,
   prefix: ({ itemCount }: { itemCount?: number }) => `共 ${itemCount ?? 0} 条`
 }))
 
 async function fetchShares() {
   const current = ++listRequestId
-  const filtering = hasFilters.value
   loading.value = true
   loadError.value = ''
-  loadedCount.value = 0
   try {
-    if (filtering) {
-      const rows: ShareVO[] = []
-      const batchSize = 200
-      let nextPage = 1
-      let total = 0
-      do {
-        const res = await getMyShares(nextPage, batchSize)
-        if (current !== listRequestId) return
-        total = res.total
-        rows.push(...res.data)
-        loadedCount.value = rows.length
-        if (!res.data.length) break
-        nextPage++
-      } while ((nextPage - 1) * batchSize < total)
-      allShares.value = Array.from(new Map(rows.map(row => [row.id, row])).values())
-      totalRaw.value = total
-      sharePage.value = Math.min(sharePage.value, Math.max(1, Math.ceil(filteredCount.value / sharePageSize.value)))
-    } else {
-      const res = await getMyShares(sharePage.value, sharePageSize.value)
-      if (current !== listRequestId) return
-      shareList.value = res.data
-      totalRaw.value = res.total
-      const lastPage = Math.max(1, Math.ceil(res.total / sharePageSize.value))
-      if (sharePage.value > lastPage) { sharePage.value = lastPage; await fetchShares() }
-    }
+    const res = await getMyShares(sharePage.value, sharePageSize.value, {
+      keyword: appliedKeyword.value || undefined,
+      targetType: filterType.value || undefined,
+      status: filterStatus.value || undefined
+    })
+    if (current !== listRequestId) return
+    shareList.value = res.data
+    totalRaw.value = res.total
+    const lastPage = Math.max(1, Math.ceil(res.total / sharePageSize.value))
+    if (sharePage.value > lastPage) { sharePage.value = lastPage; await fetchShares() }
   } catch {
     if (current === listRequestId) {
       loadError.value = '分享加载失败，请检查网络后重试。'
-      shareList.value = []; allShares.value = null
+      shareList.value = []
     }
   } finally { if (current === listRequestId) loading.value = false }
 }
 function onFilterChange() { appliedKeyword.value = keyword.value.trim(); applyFilters() }
 function applyFilters() {
   sharePage.value = 1
-  if (!hasFilters.value || !allShares.value || loading.value) void fetchShares()
+  void fetchShares()
 }
 function resetFilters() {
   keyword.value = ''; appliedKeyword.value = ''; filterType.value = null; filterStatus.value = null
   sharePage.value = 1
   void fetchShares()
 }
-function handlePageChange(page: number) { sharePage.value = page; if (!hasFilters.value) void fetchShares() }
-function handlePageSizeChange(size: number) { sharePageSize.value = size; sharePage.value = 1; if (!hasFilters.value) void fetchShares() }
+function handlePageChange(page: number) { sharePage.value = page; void fetchShares() }
+function handlePageSizeChange(size: number) { sharePageSize.value = size; sharePage.value = 1; void fetchShares() }
 
 // ==================== 编辑 ====================
 const showEditModal = ref(false)
@@ -379,7 +347,6 @@ async function handleUpdate() {
     await updateShare(editingId.value, payload)
     message.success('更新成功')
     showEditModal.value = false
-    allShares.value = null
     await fetchShares()
   } catch (e: any) {
     message.error(e?.response?.data?.message || '更新失败')
@@ -401,7 +368,6 @@ async function handleToggleStatus(row: ShareVO) {
   try {
     await updateShareStatus(row.id, next)
     message.success(next === 'active' ? '已启用' : '已停用')
-    allShares.value = null
     await fetchShares()
   } catch (e: any) {
     message.error(e?.response?.data?.message || '操作失败')
@@ -419,7 +385,6 @@ async function handleDelete(id: number) {
     if (displayShares.value.length === 1 && sharePage.value > 1) {
       sharePage.value -= 1
     }
-    allShares.value = null
     await fetchShares()
   } catch {
     message.error('删除失败')
