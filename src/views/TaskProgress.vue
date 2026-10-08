@@ -1,5 +1,6 @@
 <template>
   <div class="tp-page admin-page">
+    <ProcessingNavigation />
     <!-- 顶部：标题 + 概览 -->
     <header class="tp-header admin-page-header">
       <div class="tp-title-line">
@@ -27,28 +28,28 @@
 
     <!-- 概览卡（仅在有任务时显示） -->
     <div v-if="tasks.length > 0" class="tp-summary">
-      <div class="tp-summary-cell tp-summary-cell--video" :class="{ 'is-zero': summary.video === 0 }">
+      <div class="tp-summary-cell tp-summary-cell--video" role="button" tabindex="0" :aria-pressed="taskFilter === 'video'" @click="taskFilter = 'video'" @keydown.enter="taskFilter = 'video'" @keydown.space.prevent="taskFilter = 'video'" :class="{ 'is-zero': summary.video === 0 }">
         <span class="tp-summary-icon icon-video" />
         <div>
           <div class="tp-summary-num">{{ summary.video }}</div>
           <div class="tp-summary-key">视频</div>
         </div>
       </div>
-      <div class="tp-summary-cell tp-summary-cell--image" :class="{ 'is-zero': summary.image === 0 }">
+      <div class="tp-summary-cell tp-summary-cell--image" role="button" tabindex="0" :aria-pressed="taskFilter === 'image'" @click="taskFilter = 'image'" @keydown.enter="taskFilter = 'image'" @keydown.space.prevent="taskFilter = 'image'" :class="{ 'is-zero': summary.image === 0 }">
         <span class="tp-summary-icon icon-image" />
         <div>
           <div class="tp-summary-num">{{ summary.image }}</div>
           <div class="tp-summary-key">图片</div>
         </div>
       </div>
-      <div class="tp-summary-cell tp-summary-cell--running">
+      <div class="tp-summary-cell tp-summary-cell--running" role="button" tabindex="0" :aria-pressed="taskFilter === 'running'" @click="taskFilter = 'running'" @keydown.enter="taskFilter = 'running'" @keydown.space.prevent="taskFilter = 'running'">
         <span class="tp-summary-icon icon-running" />
         <div>
           <div class="tp-summary-num">{{ summary.running }}</div>
           <div class="tp-summary-key">进行中</div>
         </div>
       </div>
-      <div class="tp-summary-cell tp-summary-cell--failed" :class="{ 'is-zero': summary.failed === 0 }">
+      <div class="tp-summary-cell tp-summary-cell--failed" role="button" tabindex="0" :aria-pressed="taskFilter === 'failed'" @click="taskFilter = 'failed'" @keydown.enter="taskFilter = 'failed'" @keydown.space.prevent="taskFilter = 'failed'" :class="{ 'is-zero': summary.failed === 0 }">
         <span class="tp-summary-icon icon-failed" />
         <div>
           <div class="tp-summary-num">{{ summary.failed }}</div>
@@ -200,6 +201,7 @@
 </template>
 
 <script setup lang="ts">
+import ProcessingNavigation from '../components/ProcessingNavigation.vue'
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useMessage } from 'naive-ui'
 import DurableJobPanel from '../components/DurableJobPanel.vue'
@@ -462,6 +464,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.tp-summary-cell[role="button"] { cursor:pointer; }.tp-summary-cell[aria-pressed="true"] { box-shadow:inset 0 0 0 2px var(--admin-accent,#2f7b5b); }.tp-summary-cell:focus-visible { outline:2px solid var(--admin-accent,#2f7b5b); outline-offset:3px; }
+
 .tp-description { color: var(--n-text-color-3); margin: -2px 0 22px; font-size: 13px; }
 .tp-filter { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 16px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 14px; margin-bottom: 16px; }.tp-search { width: 300px; }.tp-select { width: 160px; }.tp-result { margin-left: auto; font-size: 12px; color: var(--n-text-color-3); }.tp-error { margin-bottom: 16px; }.tp-history { margin-top: 28px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 14px; padding: 20px; }
 @media(max-width:640px) { .tp-filter .tp-search { width: 100%; }.tp-title-line { flex-wrap: wrap; }.tp-filter .tp-result { margin-left: 0; } }

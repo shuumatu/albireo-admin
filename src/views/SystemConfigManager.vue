@@ -1,5 +1,6 @@
 <template>
   <div class="config-page admin-page">
+    <ProcessingNavigation />
     <header class="page-header admin-page-header">
       <div>
         <div class="eyebrow">ADMINISTRATION / RUNTIME</div>
@@ -36,8 +37,8 @@
     <n-card class="config-panel" :bordered="true" content-style="padding: 0;">
       <div class="filter-toolbar">
         <div class="filter-group">
-          <n-select v-model:value="selectedCategory" :options="categoryOptions" class="category-filter" />
-          <n-input v-model:value="searchKeyword" class="keyword-filter" placeholder="搜索配置名称、键名或说明" clearable>
+          <n-select v-model:value="selectedCategory" :options="categoryOptions" class="category-filter" aria-label="配置分类" />
+          <n-input v-model:value="searchKeyword" class="keyword-filter" placeholder="搜索配置名称、键名或说明" aria-label="搜索配置" clearable>
             <template #prefix><n-icon :component="SearchOutline" /></template>
           </n-input>
           <n-checkbox v-model:checked="pendingOnly">仅显示待填写</n-checkbox>
@@ -50,7 +51,7 @@
       </n-data-table>
     </n-card>
 
-    <n-modal v-model:show="showModal" preset="card" :mask-closable="false" :closable="!saving" :close-on-esc="!saving" :title="editingDefinition?.label ?? '填写配置'" class="config-modal" @after-leave="clearSecret">
+    <n-modal :show="showModal" @update:show="(value: boolean) => { if (!value) requestClose() }" preset="card" :mask-closable="false" :closable="!saving" :close-on-esc="!saving" :title="editingDefinition?.label ?? '填写配置'" class="config-modal" @after-leave="clearSecret">
       <n-alert v-if="editingDefinition" type="info" :show-icon="false" class="edit-tip">{{ editingDefinition.description }}</n-alert>
       <n-form :model="form" :disabled="saving" label-placement="top" @submit.prevent="handleSubmit">
         <div class="readonly-meta">
@@ -71,7 +72,7 @@
       <template #footer>
         <div class="modal-footer">
           <span class="modal-footer-hint"><n-icon :component="LockClosedOutline" />敏感值只会在当前会话中临时显示</span>
-          <n-space><n-button :disabled="saving" @click="showModal = false">取消</n-button><n-button type="primary" :loading="saving" :disabled="!hasChanges" @click="handleSubmit">保存配置</n-button></n-space>
+          <n-space><n-button :disabled="saving" @click="requestClose">取消</n-button><n-button type="primary" :loading="saving" :disabled="!hasChanges" @click="handleSubmit">保存配置</n-button></n-space>
         </div>
       </template>
     </n-modal>
@@ -79,8 +80,9 @@
 </template>
 
 <script setup lang="ts">
+import ProcessingNavigation from '../components/ProcessingNavigation.vue'
 import { computed, h, onMounted, reactive, ref } from 'vue'
-import { NButton, NIcon, NTag, NEllipsis, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NIcon, NTag, NEllipsis, useDialog, useMessage, type DataTableColumns } from 'naive-ui'
 import { AlertCircleOutline, CheckmarkCircleOutline, CopyOutline, CreateOutline, EyeOffOutline, EyeOutline, KeyOutline, LockClosedOutline, RefreshOutline, SearchOutline, SettingsOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
 import { fetchManagedConfigs, upsertConfig, updateConfig, type SystemConfigVO } from '../api/systemConfig'
 import { visionModelOptions as modelOptions, visionModelLabels } from '../constants/visionModels'
@@ -102,6 +104,12 @@ const configDefinitions: ConfigDefinition[] = [
 ]
 const booleanOptions = [{ label: '启用（true）', value: 'true' }, { label: '关闭（false）', value: 'false' }]
 const message = useMessage()
+const dialog = useDialog()
+function requestClose() {
+  if (saving.value) return
+  if (!hasChanges.value) { showModal.value = false; return }
+  dialog.warning({ title: '放弃尚未保存的修改？', content: '关闭后将恢复到上次保存的配置。', positiveText: '放弃修改', negativeText: '继续编辑', onPositiveClick: () => { showModal.value = false } })
+}
 const configs = ref<SystemConfigVO[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -193,8 +201,8 @@ onMounted(loadConfigs)
 .stat-label { display: block; color: var(--n-text-color-3); font-size: 12px; margin-bottom: 2px; } .stat-item strong { font-size: 22px; line-height: 1; }
 .config-panel { overflow: hidden; } .filter-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--n-divider-color); }
 .filter-group { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; } .category-filter { width: 170px; } .keyword-filter { width: 280px; } .result-summary { color: var(--n-text-color-3); font-size: 12px; white-space: nowrap; }
-.config-table :deep(.n-data-table-td) { padding-top: 13px; padding-bottom: 13px; } .config-key-cell { display: flex; flex-direction: column; gap: 4px; } .config-key { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; } .config-category { color: var(--n-text-color-3); font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11px; }
-.value-cell { display: flex; align-items: center; gap: 4px; min-width: 0; } .value-text { flex: 1; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; } .pending-value { color: var(--n-warning-color); font-family: inherit; }
+.config-table :deep(.n-data-table-td) { padding-top: 13px; padding-bottom: 13px; } :deep(.config-key-cell) { display: flex; flex-direction: column; gap: 4px; } :deep(.config-key) { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; } :deep(.config-category) { color: var(--n-text-color-3); font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 11px; }
+:deep(.value-cell) { display: flex; align-items: center; gap: 4px; min-width: 0; } :deep(.value-text) { flex: 1; font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; } :deep(.pending-value) { color: var(--n-warning-color); font-family: inherit; }
 .config-modal { width: min(560px, calc(100vw - 32px)); } .edit-tip { margin-bottom: 18px; } .readonly-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 13px; margin-bottom: 18px; background: var(--n-color-embedded); border-radius: 6px; }
 .meta-label { display: block; color: var(--n-text-color-3); font-size: 11px; margin-bottom: 3px; } .readonly-meta code { color: var(--n-text-color); font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; } .field-hint { display: block; margin-top: 6px; color: var(--n-text-color-3); font-size: 12px; }
 .modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; } .modal-footer-hint { display: flex; align-items: center; gap: 5px; color: var(--n-text-color-3); font-size: 11px; }

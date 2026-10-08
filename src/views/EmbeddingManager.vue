@@ -1,5 +1,6 @@
 <template>
   <div class="scanner-app admin-page">
+    <ProcessingNavigation />
     <header class="embedding-heading admin-page-header"><div><span class="embedding-eyebrow">AI / EMBEDDINGS</span><h1>向量嵌入</h1><p>查看向量覆盖率与运行状态，定位待处理媒体并恢复检索能力。</p></div><n-button secondary :loading="loading || heatmapLoading" @click="refreshStatsAndHeatmap">刷新概览</n-button></header>
     <n-alert v-if="dataError" type="error" class="embedding-error">{{ dataError }}</n-alert>
     <EmbeddingSpacePanel />
@@ -222,7 +223,7 @@
             size="tiny"
             type="primary"
             :loading="cellActionLoading"
-            title="清空向量并立即向 sidecar 投递一条嵌入任务（不再依赖定时回填）"
+            title="在最近登记的模型空间中创建嵌入任务"
             @click="onCellRetry"
           >
             重新嵌入
@@ -234,51 +235,73 @@
     </div>
 
     <!-- =====================  媒体嵌入清单  ===================== -->
-    <n-card title="媒体嵌入清单" class="list-card" size="small">
-      <n-flex :size="12" wrap align="center" style="margin-bottom: 12px">
-        <span class="label">媒体</span>
-        <n-radio-group v-model:value="mediaType" size="small">
-          <n-radio-button value="image">图片</n-radio-button>
-          <n-radio-button value="video">视频</n-radio-button>
+    <n-card class="list-card" :bordered="true" content-style="padding: 0">
+      <div class="inventory-heading">
+        <div><h2>媒体嵌入清单</h2><p>查看历史向量覆盖情况，筛选媒体并按需重新嵌入。</p></div>
+        <n-radio-group v-model:value="mediaType" :disabled="listBusy" size="small" aria-label="媒体类型">
+          <n-radio-button value="video">视频库</n-radio-button>
+          <n-radio-button value="image">图片库</n-radio-button>
         </n-radio-group>
-        <span class="label">处理状态</span>
-        <n-radio-group v-model:value="sourceFilter" size="small">
-          <n-radio-button :value="2">待嵌入（{{ formatNumber(selectedListStats?.pending) }}）</n-radio-button>
-          <n-radio-button :value="1">封面兜底（{{ formatNumber(selectedListStats?.coverDone) }}）</n-radio-button>
-          <n-radio-button :value="0">主路径完成（{{ formatNumber(selectedListStats?.fullDone) }}）</n-radio-button>
-        </n-radio-group>
-        <n-button size="small" @click="loadList" :loading="listLoading">查询</n-button>
-        <n-button size="small" type="primary" secondary :disabled="!filteredRows.length || listLoading || !!rowActionKey || cellActionLoading" :loading="batchRetryLoading" @click="retryCurrentBatch">重新嵌入筛选结果（{{ filteredRows.length }}）</n-button>
-      </n-flex>
-      <div class="list-search"><n-input v-model:value="listKeyword" clearable placeholder="筛选已加载的名称、ID 或 Hash" aria-label="筛选媒体清单" /><span>显示 {{ filteredRows.length }} / {{ rows.length }} 条 · 单次最多加载 100 条</span></div>
-      <n-alert v-if="listError" type="error" style="margin-bottom: 14px">{{ listError }}</n-alert>
-
-      <n-data-table
-        :columns="columns"
-        :data="filteredRows"
-        :row-key="(row: EmbeddingAdminRow) => row.id"
-        :loading="listLoading"
-        :pagination="{ pageSize: 20, showSizePicker: true, pageSizes: [20, 50, 100] }"
-        size="small"
-        :scroll-x="720"
-      >
+      </div>
+      <div class="inventory-states" aria-label="按嵌入状态筛选">
+        <button v-for="item in listStates" :key="item.value" type="button" class="inventory-state"
+          :class="{ active: sourceFilter === item.value }" :aria-pressed="sourceFilter === item.value"
+          :disabled="listBusy" @click="sourceFilter = item.value">
+          <span><i :style="{ background: HEAT_COLORS[item.value] }"></i>{{ item.label }}</span>
+          <strong>{{ formatNumber(item.count) }}</strong><small>{{ item.hint }}</small>
+        </button>
+      </div>
+      <div class="inventory-toolbar">
+        <n-input v-model:value="listKeyword" clearable :maxlength="200" :disabled="listBusy"
+          placeholder="搜索全库名称、文件名、ID 或 Hash" aria-label="搜索媒体清单" @keydown.enter="searchList" />
+        <n-button :loading="listLoading" :disabled="listBusy" @click="searchList">搜索</n-button>
+        <n-button v-if="listKeyword" text :disabled="listBusy" @click="listKeyword = ''">清除</n-button>
+        <span class="inventory-total" aria-live="polite">共 {{ listTotal }} 条结果</span>
+        <n-button secondary :loading="listLoading" :disabled="listBusy" @click="loadList">刷新</n-button>
+      </div>
+      <div v-if="checkedIds.length" class="inventory-selection">
+        <span>已选中本页 <strong>{{ checkedIds.length }}</strong> 项</span>
+        <n-button size="small" type="primary" :disabled="listLoading || !!rowActionKey || cellActionLoading" :loading="batchRetryLoading" @click="retryCurrentBatch">重新嵌入所选</n-button>
+        <n-button size="small" text :disabled="listBusy" @click="checkedIds = []">取消选择</n-button>
+      </div>
+      <n-alert v-if="listError" type="error" class="inventory-error">{{ listError }}</n-alert>
+      <n-data-table class="inventory-table" remote :columns="columns" :data="rows"
+        :row-key="(row: EmbeddingAdminRow) => row.id" :loading="listLoading" :pagination="false"
+        v-model:checked-row-keys="checkedIds" :bordered="false" :single-line="true" :scroll-x="780">
         <template #empty>
           <div class="table-empty">
-            <strong>{{ sourceFilter === 2 ? '当前没有待嵌入媒体' : '当前筛选没有媒体' }}</strong>
-            <span>{{ sourceFilter === 2 ? '所有已完成媒体都已有向量，或媒体仍在上传/处理中。' : '可切换媒体类型或处理状态查看其它记录。' }}</span>
+            <strong>{{ listLoading ? '正在加载媒体清单…' : listError ? '清单暂时无法加载' : listKeyword ? '没有找到匹配的媒体' : '此状态下暂无媒体' }}</strong>
+            <span>{{ listLoading ? '正在获取最新结果。' : listError ? '请点击刷新重试。' : listKeyword ? '试试其他名称、完整 ID 或 Hash，或清除搜索条件。' : '可切换上方状态或媒体类型继续查看。' }}</span>
           </div>
         </template>
       </n-data-table>
-
-      <n-alert type="info" title="处理状态说明" style="margin-top: 14px">
-        <p>图片统计与清单仅包含已处理完成的照片，不包含视频生成的封面等附属图片。视频封面仍用于视频预览。</p>
-        <ul class="explain">
-          <li><span class="dot" :style="{ background: HEAT_COLORS[0] }"></span><strong>主路径完成</strong>：已使用视频帧或原图生成向量。</li>
-          <li><span class="dot" :style="{ background: HEAT_COLORS[1] }"></span><strong>封面兜底</strong>：主媒体处理失败后使用封面生成，检索质量可能较弱。</li>
-          <li><span class="dot" :style="{ background: HEAT_COLORS[2] }"></span><strong>待嵌入</strong>：当前没有向量。可点击行内“重新嵌入”，任务会立即入队。</li>
-        </ul>
-      </n-alert>
+      <div class="inventory-footer">
+        <span>按 ID 从新到旧排列 · 勾选仅限当前页</span>
+        <n-pagination v-model:page="listPage" v-model:page-size="listPageSize" :item-count="listTotal"
+          :page-sizes="[10, 20, 50, 100]" show-size-picker :page-slot="5" :disabled="listBusy || listLoading"
+          @update:page="loadList" @update:page-size="resizeList" />
+      </div>
+      <details class="inventory-help"><summary>这些状态代表什么？</summary>
+        <p>主路径完成：通过原图或视频帧生成向量。封面兜底：使用封面生成，检索效果可能较弱。待嵌入：当前还没有历史向量。</p>
+        <p>此清单展示历史记录；当前检索使用的向量空间请查看上方空间管理。图片清单只包含照片，不含视频封面。</p>
+      </details>
     </n-card>
+    <n-drawer v-model:show="detailVisible" :width="520" style="max-width: 100vw">
+      <n-drawer-content title="媒体嵌入详情" closable>
+        <template v-if="detailRow">
+          <div class="inventory-preview"><n-image v-if="detailRow.previewUrl" :src="detailRow.previewUrl" :alt="rowTitle(detailRow)" object-fit="contain" /><n-empty v-else description="暂无预览图" /></div>
+          <h3 class="inventory-detail-title">{{ rowTitle(detailRow) }}</h3>
+          <n-descriptions label-placement="top" :column="1" bordered>
+            <n-descriptions-item label="处理状态">{{ TIER_LABELS[(detailRow.embeddingSource ?? sourceFilter) as HeatmapTier] }}</n-descriptions-item>
+            <n-descriptions-item label="文件名">{{ detailRow.fileName || '未命名' }}</n-descriptions-item>
+            <n-descriptions-item label="媒体 ID">{{ detailRow.id }}</n-descriptions-item>
+            <n-descriptions-item label="Hash"><span class="inventory-hash">{{ detailRow.hash }}</span><n-button text type="primary" @click="copyHash(detailRow)">复制</n-button></n-descriptions-item>
+            <n-descriptions-item label="失败次数">{{ detailRow.embeddingAttempts ?? 0 }}</n-descriptions-item>
+          </n-descriptions>
+        </template>
+        <template #footer><n-button v-if="detailRow?.uuid" secondary @click="openMedia(detailRow)">打开媒体详情 ↗</n-button></template>
+      </n-drawer-content>
+    </n-drawer>
 
     <!-- 右下悬浮：实时处理面板（自带 2s 轮询，无任务时自动隐藏，组件内 Teleport 到 body） -->
     <EmbeddingInFlightPanel @locate="onLocateTask" />
@@ -286,10 +309,11 @@
 </template>
 
 <script setup lang="ts">
+import ProcessingNavigation from '../components/ProcessingNavigation.vue'
 import EmbeddingSpacePanel from '../components/EmbeddingSpacePanel.vue'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { DataTableColumns } from 'naive-ui'
-import { NButton, useMessage } from 'naive-ui'
+import { NButton, NTag, NDropdown, useDialog, useMessage } from 'naive-ui'
 import {
   getEmbeddingOverview,
   getEmbeddingCalibration,
@@ -300,7 +324,7 @@ import {
   getEmbeddingHeatmap,
   getEmbeddingProgress,
   getEmbeddingSourceStats,
-  listEmbeddingRows,
+  listEmbeddingPage,
   retryEmbedding,
   retryEmbeddingBatch,
   recalculateEmbeddingCalibration,
@@ -314,6 +338,7 @@ import EmbeddingInFlightPanel from '../components/EmbeddingInFlightPanel.vue'
 import { getPublicSiteOrigin } from './video/composables/videoFormat'
 
 const message = useMessage()
+const dialog = useDialog()
 
 // ───────────────────────── 视觉常量 ─────────────────────────
 // 3 档色卡：绿（主路径）/ 黄（兜底）/ 红（待嵌入）
@@ -363,11 +388,35 @@ const rowActionKey = ref('')
 let disposed = false
 let heatmapSequence = 0
 let listSequence = 0
+let locateSequence = 0
 let runtimeSequence = 0
 let runtimeRefreshTimeout: ReturnType<typeof setTimeout> | null = null
 let runtimeTimer: ReturnType<typeof setInterval> | null = null
 const rows = ref<EmbeddingAdminRow[]>([])
-const filteredRows = computed(() => rows.value.filter(row => [row.title, row.fileName, row.id, row.hash].join(' ').toLowerCase().includes(listKeyword.value.trim().toLowerCase())))
+const listPage = ref(1)
+const listPageSize = ref(20)
+const listTotal = ref(0)
+const checkedIds = ref<number[]>([])
+const detailVisible = ref(false)
+const detailRow = ref<EmbeddingAdminRow | null>(null)
+const listBusy = computed(() => batchRetryLoading.value || !!rowActionKey.value || cellActionLoading.value)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+const listStates = computed(() => [
+  { value: 2 as const, label: '待嵌入', count: selectedListStats.value?.pending, hint: '尚未生成历史向量' },
+  { value: 1 as const, label: '封面兜底', count: selectedListStats.value?.coverDone, hint: '可重新尝试主媒体' },
+  { value: 0 as const, label: '主路径完成', count: selectedListStats.value?.fullDone, hint: '原图或视频帧已嵌入' },
+])
+function searchList() { clearTimeout(searchTimer); listPage.value = 1; checkedIds.value = []; void loadList() }
+function resizeList() { listPage.value = 1; void loadList() }
+function showMedia(row: EmbeddingAdminRow) { detailRow.value = { ...row }; detailVisible.value = true }
+async function copyHash(row: EmbeddingAdminRow) {
+  try { await navigator.clipboard.writeText(row.hash); message.success('Hash 已复制') }
+  catch { message.warning('复制失败，可在详情中选择并复制 Hash') }
+}
+function confirmAction(title: string, content: string): Promise<boolean> {
+  return new Promise(resolve => dialog.warning({ title, content, positiveText: '确认继续', negativeText: '取消',
+    onPositiveClick: () => resolve(true), onNegativeClick: () => resolve(false), onClose: () => resolve(false), onMaskClick: () => resolve(false) }))
+}
 const mediaType = ref<'image' | 'video'>('video')
 const heatmapMediaType = ref<'image' | 'video'>('video')
 const sourceFilter = ref<0 | 1 | 2>(2)
@@ -699,12 +748,12 @@ async function onCellRetry() {
     const affected = r?.affected ?? 0
     const enqueued = r?.enqueued === true
     if (affected > 0 && enqueued) {
-      message.success(`已清空向量并立即投递 id=${sel.id}`)
+      message.success(`已加入向量处理队列 id=${sel.id}`)
       closeSelectedCell()
       await Promise.all([loadAll(), loadHeatmap()])
     } else if (affected > 0) {
       // reset 成功了但没投出去（多半是缺 url / 视频未转码完成 / MQ 暂时不可达）
-      message.warning(`已清空向量但未能立即投递 id=${sel.id}（可能缺 URL、视频未转码完成或 MQ 不可达），稍后再点一次“重新嵌入”`)
+      message.warning(`任务未能立即投递 id=${sel.id}（可能缺 URL、视频未转码完成或 MQ 不可达），稍后再点一次“重新嵌入”`)
       await Promise.all([loadAll(), loadHeatmap()])
     } else {
       message.warning('未更新行（id 是否仍存在于库中？）')
@@ -744,7 +793,8 @@ function onCellLocateInList() {
   // 把媒体类型 + 来源筛选都切到画布对应口径
   mediaType.value = heatmapMediaType.value
   sourceFilter.value = sel.v as 0 | 1 | 2
-  loadList()
+  listKeyword.value = `#${sel.id}`
+  searchList()
   closeSelectedCell()
   nextTick(() => {
     const el = document.querySelector('.list-card')
@@ -825,14 +875,16 @@ async function loadAll() {
 }
 
 async function retryCurrentBatch() {
-  if (!filteredRows.value.length || batchRetryLoading.value || rowActionKey.value || cellActionLoading.value || listLoading.value) return
-  const ids = filteredRows.value.map(row => row.id)
+  if (!checkedIds.value.length || batchRetryLoading.value || rowActionKey.value || cellActionLoading.value || listLoading.value) return
+  const ids = rows.value.filter(row => checkedIds.value.includes(row.id)).map(row => row.id)
   const type = mediaType.value
-  if (!window.confirm(`将清空筛选结果中的 ${ids.length} 条向量并重新投递，确定继续吗？`)) return
+  if (!await confirmAction('重新嵌入所选媒体', `将为所选 ${ids.length} 个媒体在最近登记的模型空间中重新生成向量。任务进度可在「处理进度」中查看，历史覆盖记录不会随新任务更新。`)) return
   batchRetryLoading.value = true
   try {
     const result: any = await retryEmbeddingBatch(type, ids)
-    message.success(`已接受 ${result?.accepted ?? 0} 条，已入队 ${result?.enqueued ?? 0} 条`)
+    const report = `已接受 ${result?.accepted ?? 0} 条，已入队 ${result?.enqueued ?? 0} 条，失败 ${result?.failed ?? 0} 条`
+    if (result?.failed) message.warning(report); else message.success(report)
+    checkedIds.value = []
     await Promise.all([loadAll(), loadList(), loadHeatmap()])
   } catch (e: any) { message.error('批量重试失败：' + (e?.message ?? e)) }
   finally { batchRetryLoading.value = false }
@@ -840,32 +892,38 @@ async function retryCurrentBatch() {
 
 async function loadList() {
   if (disposed) return
+  clearTimeout(searchTimer)
   const sequence = ++listSequence
   listLoading.value = true
+  checkedIds.value = []
+  rows.value = []
   try {
-    const result = (await listEmbeddingRows(mediaType.value, sourceFilter.value, 100)) as any
+    const result = await listEmbeddingPage(mediaType.value, sourceFilter.value, listPage.value, listPageSize.value, listKeyword.value.trim())
     if (disposed || sequence !== listSequence) return
-    rows.value = Array.isArray(result) ? result : []
+    listTotal.value = result.total
+    const lastPage = Math.max(1, Math.ceil(result.total / listPageSize.value))
+    if (listPage.value > lastPage) { listPage.value = lastPage; await loadList(); return }
+    rows.value = result.rows
     listError.value = ''
   } catch (e: any) {
-    if (!disposed && sequence === listSequence) listError.value = '读取清单失败，请重新查询。' + (e?.message ?? '')
+    if (!disposed && sequence === listSequence) { rows.value = []; listTotal.value = 0; listError.value = '读取清单失败，请重新查询。' + (e?.message ?? '') }
   } finally {
     if (sequence === listSequence) listLoading.value = false
   }
 }
 
 async function onRetry(row: EmbeddingAdminRow) {
-  if (rowActionKey.value || batchRetryLoading.value || cellActionLoading.value) return
+  if (listLoading.value || rowActionKey.value || batchRetryLoading.value || cellActionLoading.value) return
   rowActionKey.value = `retry:${row.id}`
   try {
     const r: any = await retryEmbedding(mediaType.value, row.id)
     const affected = r?.affected ?? 0
     const enqueued = r?.enqueued === true
     if (affected > 0 && enqueued) {
-      message.success('已清空向量并立即投递')
+      message.success('已加入向量处理队列')
       await Promise.all([loadAll(), loadList(), loadHeatmap()])
     } else if (affected > 0) {
-      message.warning('已清空向量但未能立即投递（可能缺 url / 视频未转码完成）')
+      message.warning('任务未能立即投递（可能缺 url / 视频未转码完成）')
       await Promise.all([loadAll(), loadList(), loadHeatmap()])
     } else {
       message.warning('未更新行（检查 id 是否存在）')
@@ -876,14 +934,14 @@ async function onRetry(row: EmbeddingAdminRow) {
 }
 
 async function onRetranscode(row: EmbeddingAdminRow) {
-  if (rowActionKey.value || batchRetryLoading.value || cellActionLoading.value) return
-  if (!window.confirm('重转码会重新生成视频版本并重置向量。确认重新处理这条视频？')) return
+  if (listLoading.value || rowActionKey.value || batchRetryLoading.value || cellActionLoading.value) return
+  if (!await confirmAction('重新转码视频', `将为「${rowTitle(row)}」重新生成视频版本并重置向量。这可能需要较长时间。`)) return
   rowActionKey.value = `transcode:${row.id}`
   try {
     const res: any = await retranscodeVideo(row.hash)
     if (res?.ok) {
       message.success('已触发重转码')
-      await Promise.all([loadAll(), loadHeatmap()])
+      await Promise.all([loadAll(), loadList(), loadHeatmap()])
     } else {
       message.error(res?.error ?? '重转码失败')
     }
@@ -911,28 +969,38 @@ function previewUrl(row: EmbeddingAdminRow): string {
   return row.previewUrl ?? ''
 }
 
-function onPreviewError(event: Event, row: EmbeddingAdminRow) {
+function onPreviewError(event: Event) {
   const image = event.currentTarget as HTMLImageElement | null
   if (!image) return
-  // medium/thumb 资源可能还没生成，先回退到后端返回的原始 URL；
-  // 原图也不可用时隐藏图片，保留可识别的媒体底色和标题。
-  if (row.previewUrl && image.dataset.fallbackApplied !== 'true') {
-    image.dataset.fallbackApplied = 'true'
-    image.src = row.previewUrl
-    return
-  }
   image.style.display = 'none'
+  const fallback = document.createElement('span')
+  fallback.className = 'media-thumb-placeholder'
+  fallback.textContent = '暂无预览'
+  image.parentElement?.appendChild(fallback)
 }
 
 async function onLocateTask(task: { mediaType: 'image' | 'video'; mediaId: number }) {
-  mediaType.value = task.mediaType
-  sourceFilter.value = 2
-  await loadList()
-  await nextTick()
-  document.querySelector('.list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  if (listBusy.value) return
+  const sequence = ++locateSequence
+  try {
+    const pages = await Promise.all(([0, 1, 2] as const).map(source =>
+      listEmbeddingPage(task.mediaType, source, 1, 1, `#${task.mediaId}`)))
+    if (disposed || sequence !== locateSequence) return
+    const source = pages.findIndex(page => page.rows.some(row => row.id === task.mediaId))
+    if (source < 0) { message.info('该媒体已删除或尚未处理完成，暂不在历史嵌入清单中'); return }
+    mediaType.value = task.mediaType
+    sourceFilter.value = source as HeatmapTier
+    listKeyword.value = `#${task.mediaId}`
+    await nextTick()
+    searchList()
+    document.querySelector('.list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  } catch (e: any) {
+    if (!disposed && sequence === locateSequence) message.error('定位失败，请稍后重试：' + (e?.message ?? e))
+  }
 }
 
 const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
+  { type: 'selection', disabled: () => listBusy.value || listLoading.value },
   {
     title: '媒体',
     key: 'media',
@@ -941,19 +1009,19 @@ const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
       h('button', {
         class: 'media-thumb-button',
         type: 'button',
-        title: '打开媒体详情',
-        onClick: () => openMedia(row)
+        title: '预览与嵌入详情',
+        onClick: () => showMedia(row)
       }, [row.previewUrl
         ? h('img', {
           class: 'media-thumb',
           src: previewUrl(row),
           alt: rowTitle(row),
           loading: 'lazy',
-          onError: (event: Event) => onPreviewError(event, row)
+          onError: (event: Event) => onPreviewError(event)
         })
-        : h('span', { class: 'media-thumb-placeholder' }, mediaType.value === 'video' ? 'VIDEO' : 'IMAGE')]),
+        : h('span', { class: 'media-thumb-placeholder' }, mediaType.value === 'video' ? '视频' : '图片')]),
       h('div', { class: 'media-copy' }, [
-        h('button', { class: 'media-title', type: 'button', title: '打开媒体详情', onClick: () => openMedia(row) }, rowTitle(row)),
+        h('button', { class: 'media-title', type: 'button', title: rowTitle(row), onClick: () => showMedia(row) }, rowTitle(row)),
         h('div', { class: 'media-meta' }, [
           `${mediaType.value === 'video' ? '视频' : '图片'} · ID ${row.id}`,
           row.hash ? ` · ${row.hash.slice(0, 12)}` : ''
@@ -965,7 +1033,7 @@ const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
     title: '处理结果',
     key: 'embeddingSource',
     width: 110,
-    render: (r) => r.embeddingSource === 1 ? '封面兜底' : r.embeddingSource === 0 || r.embeddingSource == null ? '主路径完成' : '待嵌入'
+    render: (r) => h(NTag, { size: 'small', round: true, bordered: false, type: (r.embeddingSource ?? sourceFilter.value) === 2 ? 'warning' : (r.embeddingSource ?? sourceFilter.value) === 1 ? 'info' : 'success' }, { default: () => TIER_LABELS[(r.embeddingSource ?? sourceFilter.value) as HeatmapTier] })
   },
   {
     title: '失败次数',
@@ -981,20 +1049,22 @@ const columns = computed<DataTableColumns<EmbeddingAdminRow>>(() => [
       const btns = [
         h(
           NButton,
-          { size: 'small', type: 'primary', secondary: true, loading: rowActionKey.value === `retry:${row.id}`, disabled: batchRetryLoading.value || cellActionLoading.value || (!!rowActionKey.value && rowActionKey.value !== `retry:${row.id}`), onClick: () => onRetry(row) },
+          { size: 'small', type: 'primary', secondary: true, loading: rowActionKey.value === `retry:${row.id}`, disabled: listLoading.value || batchRetryLoading.value || cellActionLoading.value || (!!rowActionKey.value && rowActionKey.value !== `retry:${row.id}`), onClick: () => onRetry(row) },
           { default: () => '重新嵌入' }
         )
       ]
-      if (mediaType.value === 'video') {
-        btns.push(
-          h(NButton, { size: 'small', loading: rowActionKey.value === `transcode:${row.id}`, disabled: batchRetryLoading.value || cellActionLoading.value || (!!rowActionKey.value && rowActionKey.value !== `transcode:${row.id}`), onClick: () => onRetranscode(row) }, { default: () => '重转码' })
-        )
-      }
-      if (row.uuid) {
-        btns.push(
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openMedia(row) }, { default: () => '查看详情' })
-        )
-      }
+      btns.push(h(NDropdown, {
+        trigger: 'click', options: [
+          { label: '预览与详情', key: 'preview' }, { label: '复制 Hash', key: 'copy' },
+          ...(row.uuid ? [{ label: '打开媒体页面 ↗', key: 'open' }] : []),
+          ...(mediaType.value === 'video' ? [{ label: '重新转码…', key: 'transcode', disabled: listBusy.value }] : [])
+        ], onSelect: (key: string) => {
+          if (key === 'preview') showMedia(row)
+          if (key === 'copy') void copyHash(row)
+          if (key === 'open') openMedia(row)
+          if (key === 'transcode') void onRetranscode(row)
+        }
+      }, { default: () => h(NButton, { size: 'small', quaternary: true, 'aria-label': `更多操作：${rowTitle(row)}` }, { default: () => '更多 ···' }) }))
       return h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, btns)
     }
   }
@@ -1024,9 +1094,24 @@ watch(autoRefreshSec, () => {
 })
 
 watch([mediaType, sourceFilter], () => {
+  locateSequence++
   rows.value = []
-  listKeyword.value = ''
-  loadList()
+  listTotal.value = 0
+  listPage.value = 1
+  checkedIds.value = []
+  detailVisible.value = false
+  clearTimeout(searchTimer)
+  void loadList()
+})
+
+watch(listKeyword, () => {
+  locateSequence++
+  listSequence++
+  rows.value = []
+  checkedIds.value = []
+  listLoading.value = true
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(searchList, 350)
 })
 
 // ───────────────────────── 入口 ─────────────────────────
@@ -1053,6 +1138,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true
+  clearTimeout(searchTimer)
   heatmapSequence++
   listSequence++
   runtimeSequence++
@@ -1068,6 +1154,17 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.inventory-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:24px; }
+.inventory-heading h2 { font-size:18px; margin:0 0 6px; }.inventory-heading p { margin:0; color:var(--n-text-color-3); font-size:13px; }
+.inventory-states { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:0 24px 20px; }
+.inventory-state { text-align:left; background:var(--n-card-color); border:1px solid var(--n-divider-color); border-radius:12px; padding:16px 18px; color:inherit; font:inherit; cursor:pointer; }
+.inventory-state.active { border-color:var(--admin-accent,#2f7b5b); background:var(--admin-accent-soft,#e6f3e9); box-shadow:inset 0 0 0 1px var(--admin-accent,#2f7b5b); }
+.inventory-state span { display:flex; align-items:center; gap:8px; font-size:13px; }.inventory-state i { width:7px; height:7px; border-radius:50%; }.inventory-state strong { display:block; font-size:26px; margin:8px 0 2px; font-variant-numeric:tabular-nums; }.inventory-state small { color:var(--n-text-color-3); }
+.inventory-state:focus-visible { outline:2px solid var(--admin-accent,#2f7b5b); outline-offset:3px; }
+.inventory-toolbar,.inventory-selection,.inventory-footer { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:16px 24px; border-top:1px solid var(--n-divider-color); }.inventory-toolbar .n-input { max-width:380px; }.inventory-total { flex:1; color:var(--n-text-color-3); font-size:12px; }.inventory-selection { background:var(--admin-accent-soft,#e6f3e9); }.inventory-footer { justify-content:space-between; }.inventory-footer>span { color:var(--n-text-color-3); font-size:12px; }
+.inventory-error { margin:0 24px 16px; }.inventory-table :deep(.n-data-table-td) { padding-top:16px; padding-bottom:16px; }.inventory-help { padding:16px 24px; border-top:1px solid var(--n-divider-color); color:var(--n-text-color-3); font-size:12px; }.inventory-help summary { cursor:pointer; }.inventory-help p { line-height:1.8; }.inventory-preview { min-height:180px; display:grid; place-items:center; background:var(--admin-bg,#f5f9f5); border-radius:12px; padding:16px; }.inventory-preview :deep(img) { max-width:100%; max-height:300px; }.inventory-detail-title,.inventory-hash { overflow-wrap:anywhere; }.inventory-hash { display:block; font-family:monospace; }
+@media(max-width:700px) { .inventory-heading { align-items:flex-start; flex-direction:column; padding:18px; }.inventory-states { padding:0 18px 18px; gap:8px; }.inventory-state { padding:12px 10px; }.inventory-state small { display:none; }.inventory-state strong { font-size:22px; }.inventory-toolbar,.inventory-footer,.inventory-selection { padding:14px 18px; }.inventory-toolbar .n-input { max-width:none; width:100%; }.inventory-footer :deep(.n-pagination) { flex-wrap:wrap; } }
+
 /* ===========================================================
    整体页面 & 「窗口」外壳
    ========================================================== */
@@ -1614,16 +1711,16 @@ onBeforeUnmount(() => {
 .list-card {
   margin-top: 8px;
 }
-.media-cell {
+:deep(.media-cell) {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
-.media-thumb-button {
+:deep(.media-thumb-button) {
   flex: 0 0 auto;
-  width: 56px;
-  height: 42px;
+  width: 76px;
+  height: 56px;
   padding: 0;
   border: 0;
   border-radius: 5px;
@@ -1631,13 +1728,13 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: #eef0f3;
 }
-.media-thumb {
+:deep(.media-thumb) {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.media-thumb-placeholder {
+:deep(.media-thumb-placeholder) {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1647,10 +1744,10 @@ onBeforeUnmount(() => {
   font-size: 9px;
   font-weight: 700;
 }
-.media-copy {
+:deep(.media-copy) {
   min-width: 0;
 }
-.media-title {
+:deep(.media-title) {
   display: block;
   max-width: 100%;
   padding: 0;
@@ -1665,11 +1762,11 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.media-title:hover {
+:deep(.media-title:hover) {
   color: #2f7d4a;
   text-decoration: underline;
 }
-.media-meta {
+:deep(.media-meta) {
   margin-top: 3px;
   overflow: hidden;
   color: #7a7a7a;

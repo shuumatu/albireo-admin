@@ -14,12 +14,13 @@
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
-    <!-- 16:9 封面区，整张图作背景 -->
+    <!-- 16:9 黑底封面区，按原比例完整显示视频画面 -->
     <div class="cover-wrapper" ref="coverWrapper">
       <MediaImage :renditions="video?.renditions"
         v-if="video.coverUrl && !coverFailed"
         :src="video.coverUrl"
         :alt="title"
+        fit="contain"
         class="cover-img"
         loading="lazy"
         @error="coverFailed = true"
@@ -317,13 +318,13 @@ onBeforeUnmount(() => { if (previewTimer) window.clearTimeout(previewTimer) })
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #0e0e12;
+  background: #000;
   overflow: hidden;
 }
 :deep(.cover-img) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .cover-placeholder {

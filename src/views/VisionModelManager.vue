@@ -1,5 +1,6 @@
 <template>
   <div class="vision-page admin-page">
+    <ProcessingNavigation />
     <header class="admin-page-header vision-header">
       <div><span class="eyebrow">AI / VISION</span><h1>视觉模型管理</h1><p>为新提交的分析任务选择模型，集中查看和切换当前配置。</p></div>
       <n-button secondary :loading="loading" :disabled="switching" @click="loadCurrentModel">刷新状态</n-button>
@@ -26,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import ProcessingNavigation from '../components/ProcessingNavigation.vue'
 import { computed, ref, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { getVisionModel, switchVisionModel } from '../api/visionModel'
@@ -42,13 +44,14 @@ const descriptions: Record<string, string> = { zhipu: '智谱视觉模型 · 免
 
 async function loadCurrentModel() {
   if (loading.value || switching.value) return
+  const preserveSelection = hasChanges.value
   loading.value = true
   try {
     const res: any = await getVisionModel()
     const model = res.data ?? res
     if (typeof model !== 'string' || !model) throw new Error('无有效模型配置')
     currentModel.value = model
-    selectedModel.value = model
+    if (!preserveSelection) selectedModel.value = model
     loadError.value = ''
   } catch {
     loadError.value = '获取当前模型失败，请刷新重试。已有选择已保留。'

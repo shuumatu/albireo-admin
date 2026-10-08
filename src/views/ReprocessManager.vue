@@ -1,5 +1,6 @@
 <template>
   <div class="rp-page admin-page">
+    <ProcessingNavigation />
     <header class="rp-header admin-page-header">
       <div class="rp-title-line">
         <h2 class="rp-title">重新处理</h2>
@@ -8,32 +9,24 @@
         </n-tag>
         <span v-if="lastUpdatedText" class="rp-updated">最近刷新 {{ lastUpdatedText }}</span>
       </div>
-      <div class="rp-actions">
+      <div v-if="workspace === 'failed'" class="rp-actions">
         <n-switch v-model:value="autoRefresh" size="small" aria-label="自动刷新重新处理列表" />
         <span class="rp-actions-label">自动刷新</span>
         <n-button :loading="loading" size="small" tertiary @click="loadPage">刷新</n-button>
       </div>
     </header>
     <p class="rp-description">集中恢复处理失败的媒体，保留已经生成的可用版本。</p>
-    <DerivativeMigration />
+    <n-tabs v-model:value="workspace" type="segment" class="rp-workspace">
+      <n-tab name="failed">失败恢复 · {{ totalCount }}</n-tab>
+      <n-tab name="migration">播放与预览升级</n-tab>
+    </n-tabs>
+    <DerivativeMigration v-if="workspace === 'migration'" />
+    <section v-show="workspace === 'failed'" aria-label="失败媒体恢复">
     <n-alert v-if="loadError" type="error" class="rp-help">{{ loadError }}</n-alert>
 
-    <n-alert type="info" :show-icon="false" class="rp-help">
-      <p>
-        本页统一管理
-        <strong>视频转码失败（含封面缺失）</strong>
-        与
-        <strong>图片处理失败</strong>
-        的人工重试。重试时只会重做缺失部分（视频缺哪几档转哪几档；封面已存在则不再重抽帧）。
-      </p>
-      <p>
-        若怀疑视频源 mp4 本身损坏（PyAV 拉视频失败、moov atom not found 等），请到
-        <router-link to="/manager/embedding" class="rp-link">向量嵌入</router-link>
-        页执行「重转码救援」，那条链路会同时重置 video_versions 与 embedding。
-      </p>
-    </n-alert>
+    <div class="rp-guide"><strong>只重做失败或缺失的部分</strong><p>视频保留已完成的清晰度与封面，图片重新生成处理结果。已删除的媒体不会出现在操作清单中。</p><router-link to="/manager/task-progress">查看处理进度 →</router-link></div>
 
-    <div class="rp-toolbar admin-toolbar"><n-input v-model:value="keyword" clearable placeholder="筛选本页文件名或 Hash" aria-label="筛选本页文件" /><span>当前页筛选 · 每 10 秒自动刷新</span></div>
+    <div class="rp-toolbar admin-toolbar"><n-input v-model:value="keyword" clearable placeholder="筛选本页文件名或 Hash" aria-label="筛选本页文件" /><span>当前页筛选 · {{ autoRefresh ? '每 10 秒自动刷新' : '自动刷新已暂停' }}</span></div>
     <n-tabs v-model:value="activeTab" type="line" size="small" @update:value="onTabChange">
       <n-tab-pane name="video" :tab="`视频 (${page.videoTotal})`">
         <n-data-table
@@ -46,11 +39,11 @@
           :pagination="paginationProps"
           :row-key="(r: ReprocessVideoRow) => r.hash"
           :bordered="false"
-          :single-line="false"
+          :single-line="true"
           size="small"
           @update:page="onPageChange"
           @update:page-size="onPageSizeChange"
-        />
+        ><template #empty><div class="rp-empty"><strong>{{ keyword ? '本页没有匹配的媒体' : '暂无需要恢复的媒体' }}</strong><span>{{ keyword ? '请清除筛选条件或切换分页。' : '处理失败的媒体会在这里出现，可到处理进度查看进行中的任务。' }}</span><n-button v-if="keyword" text type="primary" @click="keyword = ''">清除筛选</n-button></div></template></n-data-table>
       </n-tab-pane>
 
       <n-tab-pane name="image" :tab="`图片 (${page.imageTotal})`">
@@ -64,17 +57,19 @@
           :pagination="paginationProps"
           :row-key="(r: ReprocessImageRow) => r.hash"
           :bordered="false"
-          :single-line="false"
+          :single-line="true"
           size="small"
           @update:page="onPageChange"
           @update:page-size="onPageSizeChange"
-        />
+        ><template #empty><div class="rp-empty"><strong>{{ keyword ? '本页没有匹配的媒体' : '暂无需要恢复的媒体' }}</strong><span>{{ keyword ? '请清除筛选条件或切换分页。' : '处理失败的媒体会在这里出现，可到处理进度查看进行中的任务。' }}</span><n-button v-if="keyword" text type="primary" @click="keyword = ''">清除筛选</n-button></div></template></n-data-table>
       </n-tab-pane>
     </n-tabs>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
+import ProcessingNavigation from '../components/ProcessingNavigation.vue'
 import DerivativeMigration from '../components/DerivativeMigration.vue'
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
@@ -108,6 +103,7 @@ const message = useMessage()
 
 type ActiveTab = 'video' | 'image'
 
+const workspace = ref<'failed' | 'migration'>('failed')
 const activeTab = ref<ActiveTab>('video')
 const pageNo = ref(1)
 const pageSize = ref(20)
@@ -159,6 +155,9 @@ async function loadPage() {
       type: activeTab.value,
     })
     if (disposed || sequence !== loadSequence) return
+    const total = activeTab.value === 'video' ? result.videoTotal : result.imageTotal
+    const lastPage = Math.max(1, Math.ceil(total / pageSize.value))
+    if (pageNo.value > lastPage) { pageNo.value = lastPage; await loadPage(); return }
     page.value = result
     loadError.value = ''
     lastUpdatedAt.value = Date.now()
@@ -193,7 +192,8 @@ async function onRetry(mediaType: 'video' | 'image', hash: string) {
       const detail = mediaType === 'video'
         ? `${(res.requeued ?? []).join(', ') || '（无缺失档）'}${res.needCover ? ' + 封面' : ''}`
         : '处理任务已重投'
-      message.success(`已重新投递: ${detail}`)
+      if (res.message) message.info('所有输出已齐全，无需重新处理')
+      else message.success(`已重新投递: ${detail}`)
       // worker 落库需要一拍
       if (!disposed) { if (retryTimer) clearTimeout(retryTimer); retryTimer = setTimeout(loadPage, 1000) }
     } else {
@@ -201,7 +201,8 @@ async function onRetry(mediaType: 'video' | 'image', hash: string) {
     }
   } catch (err: any) {
     const detail = err?.response?.data?.error ?? err?.message ?? err
-    message.error(`重投失败：${detail}`)
+    if (err?.response?.status === 404) { message.warning('媒体已删除或状态已变化，正在刷新清单'); await loadPage() }
+    else message.error(`重投失败：${detail}`)
   } finally {
     retryingHash.value = null
   }
@@ -316,7 +317,8 @@ const videoColumns = computed<DataTableColumns<ReprocessVideoRow>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 130,
+    width: 140,
+    fixed: 'right',
     render: (row) => {
       const noWork = row.missingQualities.length === 0 && row.coverPresent
       return h(
@@ -326,10 +328,10 @@ const videoColumns = computed<DataTableColumns<ReprocessVideoRow>>(() => [
           type: 'warning',
           tertiary: true,
           loading: retryingHash.value === row.hash,
-          disabled: retryingHash.value !== null && retryingHash.value !== row.hash,
+          disabled: noWork || (retryingHash.value !== null && retryingHash.value !== row.hash),
           onClick: () => onRetry('video', row.hash),
         },
-        { default: () => (noWork ? '回到处理流程' : '重新处理') }
+        { default: () => (noWork ? '输出已齐全' : '重新处理') }
       )
     },
   },
@@ -377,7 +379,8 @@ const imageColumns = computed<DataTableColumns<ReprocessImageRow>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 130,
+    width: 140,
+    fixed: 'right',
     render: (row) =>
       h(
         NButton,
@@ -397,7 +400,7 @@ const imageColumns = computed<DataTableColumns<ReprocessImageRow>>(() => [
 function startPolling() {
   stopPolling()
   // 重新处理页不像处理进度页那么频繁；10s 一次足够看到 worker 完成回填
-  timer = setInterval(() => { if (!document.hidden && !loading.value) void loadPage() }, 10_000)
+  timer = setInterval(() => { if (!document.hidden && workspace.value === 'failed' && !loading.value && !retryingHash.value) void loadPage() }, 10_000)
 }
 function stopPolling() {
   if (timer) {
@@ -405,6 +408,7 @@ function stopPolling() {
     timer = null
   }
 }
+watch(workspace, value => { if (value === 'failed') void loadPage() })
 watch(autoRefresh, (v) => {
   if (v) startPolling()
   else stopPolling()
@@ -431,6 +435,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.rp-workspace { margin:0 0 20px; }.rp-guide { border:1px solid var(--n-divider-color); background:var(--n-card-color); border-radius:12px; padding:18px 20px; }.rp-guide strong { font-size:14px; }.rp-guide p { color:var(--n-text-color-3); font-size:13px; margin:6px 0; }.rp-guide a { font-size:12px; color:var(--admin-accent,#2f7b5b); text-decoration:none; }.rp-empty { display:flex; flex-direction:column; align-items:center; gap:8px; padding:28px 12px; }.rp-empty span { font-size:12px; color:var(--n-text-color-3); }
+
 .rp-description { margin: 0 0 22px; color: var(--n-text-color-3); font-size: 13px; }.rp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; background: var(--n-card-color); border: 1px solid var(--n-divider-color); border-radius: 14px; margin: 18px 0 10px; }.rp-toolbar .n-input { max-width: 330px; }.rp-toolbar span { color: var(--n-text-color-3); font-size: 12px; white-space: nowrap; }
 @media(max-width:680px) { .rp-page { padding: 20px 16px !important; }.rp-title-line { flex-wrap: wrap; }.rp-toolbar { align-items: stretch; flex-direction: column; }.rp-toolbar .n-input { max-width: none; } }
 .rp-page {
@@ -499,34 +505,34 @@ onUnmounted(() => {
   border: 1px solid var(--n-divider-color);
 }
 
-.rp-file-cell {
+:deep(.rp-file-cell) {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.rp-file-name {
+:deep(.rp-file-name) {
   font-size: 13px;
   color: var(--n-text-color);
 }
 
-.rp-file-hash {
+:deep(.rp-file-hash) {
   font-size: 11px;
   color: var(--n-text-color-3);
   font-family: 'JetBrains Mono', 'Consolas', 'Menlo', monospace;
 }
 
-.rp-q-row {
+:deep(.rp-q-row) {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.rp-q-row :deep(.is-faded) {
+:deep(.rp-q-row .is-faded) {
   opacity: 0.45;
 }
 
-.rp-empty-cell {
+:deep(.rp-empty-cell) {
   color: var(--n-text-color-3);
 }
 </style>

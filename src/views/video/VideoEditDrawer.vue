@@ -82,7 +82,7 @@
       <div v-if="video" class="drawer-body">
         <!-- 顶部：缩略图 + 行内标题输入 -->
         <div class="drawer-cover">
-          <MediaImage :renditions="video?.renditions" v-if="video.coverUrl" :src="video.coverUrl" :alt="video.fileName" />
+          <MediaImage :renditions="video?.renditions" v-if="video.coverUrl" :src="video.coverUrl" :alt="video.fileName" fit="contain" />
           <div v-else class="drawer-cover__placeholder">无封面</div>
         </div>
 
@@ -658,13 +658,13 @@ async function onLocationSave() {
   aspect-ratio: 16 / 9;
   border-radius: 8px;
   overflow: hidden;
-  background: #0e0e12;
+  background: #000;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 .drawer-cover :deep(img) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .drawer-cover__placeholder {

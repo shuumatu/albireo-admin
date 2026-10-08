@@ -23,6 +23,7 @@
         v-if="video.coverUrl && !coverFailed"
         :src="video.coverUrl"
         :alt="title"
+        fit="contain"
         loading="lazy"
         @error="coverFailed = true"
       />
@@ -242,13 +243,13 @@ function onRowDblClick() {
   border-radius: 6px;
   overflow: hidden;
   /* 缩略图永远黑底（视频天然黑底好看） */
-  background: #0e0e12;
+  background: #000;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 .row-thumb :deep(img) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .thumb-placeholder {

@@ -205,3 +205,9 @@ export function getEmbeddingInFlight() {
     timeout: 5_000
   })
 }
+
+export function listEmbeddingPage(mediaType: 'image' | 'video', source: 0 | 1 | 2, page: number, pageSize: number, keyword: string) {
+  return request.get<{ rows: EmbeddingAdminRow[]; total: number }, { rows: EmbeddingAdminRow[]; total: number }>('/embedding/page', {
+    params: { mediaType, source, page, pageSize, keyword }
+  })
+}
