@@ -58,16 +58,13 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { NInput, NInputGroup, NInputGroupLabel, NButton, NButtonGroup } from 'naive-ui'
-import { wgs84ToGcj02, gcj02ToWgs84, isInChina } from '../utils/coordTransform'
 
 export interface LocationPoint {
   lat: number
   lng: number
 }
 
-/** Vector and satellite maps use WGS84 display coordinates.
- * Existing stored coordinates retain their legacy conversion until a separate data migration.
- */
+/** The location API, vector maps and satellite maps all use WGS84 coordinates. */
 type LayerId = 'protomaps-light' | 'protomaps-dark' | 'satellite'
 
 interface VectorLayerDef {
@@ -143,19 +140,6 @@ function getLayerDef(id: LayerId): LayerDef {
   return LAYER_DEFS.find(l => l.id === id) ?? LAYER_DEFS[0]
 }
 
-// Preserve the current storage convention; all remaining basemaps display WGS84.
-function toDisplayCoord(lat: number, lng: number): { lat: number; lng: number } {
-  if (!isInChina(lng, lat)) return { lat, lng }
-  const [wLng, wLat] = gcj02ToWgs84(lng, lat)
-  return { lat: wLat, lng: wLng }
-}
-
-function toStoreCoord(lat: number, lng: number): { lat: number; lng: number } {
-  if (!isInChina(lng, lat)) return { lat, lng }
-  const [gLng, gLat] = wgs84ToGcj02(lng, lat)
-  return { lat: gLat, lng: gLng }
-}
-
 function syncInputsFromModel() {
   if (props.modelValue) {
     latInput.value = String(props.modelValue.lat)
@@ -175,7 +159,7 @@ function emitPosition(point: LocationPoint | null) {
 function updateMarker() {
   if (!map) return
   if (props.modelValue) {
-    const d = toDisplayCoord(props.modelValue.lat, props.modelValue.lng)
+    const d = props.modelValue
     if (marker) {
       marker.setLngLat([d.lng, d.lat])
     } else {
@@ -184,8 +168,7 @@ function updateMarker() {
         .addTo(map)
       marker.on('dragend', () => {
         const lngLat = marker!.getLngLat()
-        const stored = toStoreCoord(lngLat.lat, lngLat.lng)
-        emitPosition({ lat: stored.lat, lng: stored.lng })
+        emitPosition({ lat: lngLat.lat, lng: lngLat.lng })
       })
     }
   } else {
@@ -238,8 +221,7 @@ function buildRasterStyle(): maplibregl.StyleSpecification {
  *   vector → raster：rebuild 出整套 raster style 后 setStyle
  *
  * setStyle 会保留 maplibre Marker（marker 是挂在 .maplibregl-canvas-container 子节点的 DOM，
- * 不属于 style 的一部分），但坐标系切换需要在切换完成后调用 updateMarker
- * 重新走一遍 toDisplayCoord，避免国内点在 GCJ-02 ↔ WGS-84 之间错位。
+ * 不属于 style 的一部分）。所有底图使用 WGS84，切换后保持标记和中心坐标一致。
  */
 async function switchLayer(layerId: LayerId) {
   if (!map || activeLayer.value === layerId) return
@@ -257,10 +239,8 @@ async function switchLayer(layerId: LayerId) {
     map.setStyle(buildRasterStyle(), { diff: false })
   }
 
-  // 坐标系切换（GCJ-02 ↔ WGS-84）下，国内点的视觉位置会偏，需要重新设 marker
-  // 并把视图中心也同步过去。境外点不受影响（toDisplayCoord 走 identity 分支）。
   if (props.modelValue) {
-    const d = toDisplayCoord(props.modelValue.lat, props.modelValue.lng)
+    const d = props.modelValue
     map.jumpTo({ center: [d.lng, d.lat] })
     updateMarker()
   }
@@ -272,10 +252,7 @@ onMounted(async () => {
   const initialDef = getLayerDef(activeLayer.value)
 
   const center: [number, number] = props.modelValue
-    ? (() => {
-        const d = toDisplayCoord(props.modelValue.lat, props.modelValue.lng)
-        return [d.lng, d.lat] as [number, number]
-      })()
+    ? [props.modelValue.lng, props.modelValue.lat]
     : [props.defaultCenter[1], props.defaultCenter[0]]
 
   // 初始 style：vector 走 protomaps JSON，raster 用合成 style
@@ -302,8 +279,7 @@ onMounted(async () => {
 
   map.on('click', (e: maplibregl.MapMouseEvent) => {
     const { lat, lng } = e.lngLat
-    const stored = toStoreCoord(lat, lng)
-    emitPosition({ lat: stored.lat, lng: stored.lng })
+    emitPosition({ lat, lng })
   })
 
   map.on('load', () => {
@@ -325,8 +301,7 @@ function onFullscreenChange() {
 watch(() => props.modelValue, (newVal, oldVal) => {
   updateMarker()
   if (newVal && !oldVal && map) {
-    const d = toDisplayCoord(newVal.lat, newVal.lng)
-    map.jumpTo({ center: [d.lng, d.lat] })
+    map.jumpTo({ center: [newVal.lng, newVal.lat] })
   }
 }, { deep: true })
 
